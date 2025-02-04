@@ -1,0 +1,12 @@
+[package]
+name = "sample_rust"
+version = "0.1.0"
+edition = "2021"
+
+[profile.dev]
+panic = "unwind"
+
+[profile.release]
+panic = "unwind"
+
+[dependencies]
