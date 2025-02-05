@@ -91,6 +91,15 @@ unsigned getIntrinsicCost(StringRef Name)
     if (Name.starts_with("llvm.log") || Name.starts_with("llvm.log2") ||
         Name.starts_with("llvm.log10"))
         return 25;
+
+    if (Name.starts_with("llvm.masked.load") || Name.starts_with("llvm.masked.store"))
+        return 4;
+
+    if (Name.starts_with("llvm.masked.gather") || Name.starts_with("llvm.masked.scatter"))
+        return 6;
+
+    if (Name.starts_with("llvm.matrix"))
+        return 8;
         
     return 0;
 }
@@ -188,6 +197,19 @@ unsigned getFuelCost(Instruction &I)
             break;
 
         case Instruction::FCmp:
+            baseCost = 2;
+            break;
+
+        case Instruction::ExtractElement:
+        case Instruction::InsertElement:
+            baseCost = 2;
+            break;
+
+        case Instruction::ShuffleVector:
+            baseCost = 3;
+            break;
+
+        case Instruction::Select:
             baseCost = 2;
             break;
 
