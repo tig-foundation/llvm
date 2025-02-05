@@ -46,6 +46,11 @@ unsigned getIntrinsicCost(StringRef Name)
         Name.starts_with("llvm.arm.neon.vmaxv") || Name.starts_with("llvm.arm.neon.vminv"))
         return 3;
 
+    if (Name.starts_with("llvm.arm.neon.cmeq") || Name.starts_with("llvm.arm.neon.cmge") ||
+        Name.starts_with("llvm.arm.neon.cmgt") || Name.starts_with("llvm.arm.neon.cmle") ||
+        Name.starts_with("llvm.arm.neon.cmlt"))
+        return 3;
+
     if (Name.starts_with("llvm.abs") || Name.starts_with("llvm.fabs"))
         return 1;
 
