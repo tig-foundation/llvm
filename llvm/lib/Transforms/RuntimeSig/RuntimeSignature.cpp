@@ -83,7 +83,7 @@ struct InstructionPrimes {
     static constexpr uint64_t Mul_f64 = 0x883C081D0CDE3065;
     static constexpr uint64_t Div_f64 = 0xFED4DB903BB79241;
     static constexpr uint64_t Rem_f64 = 0xC6051FFCF3752D2B;
-    static constexpr uint64_t Sqrt_f64 = 0xDA31E485E5E0C445;
+    static constexpr uint64_t Sqrt_f64 = 0xb79249404c3bc015;
     static constexpr uint64_t FNeg_f64 = 0xE94FDBF317D00AB7;
 
     // Vector operations - element-wise
@@ -122,7 +122,7 @@ struct InstructionPrimes {
     static constexpr uint64_t Xor_i32 = 0xE12B4AF73AAABEEF;
     static constexpr uint64_t Xor_i64 = 0xC1B8CDB5496BAFD7;
     static constexpr uint64_t Xor_vec_i8 = 0x6230a2fffd9b7cd5;
-    static constexpr uint64_t Xor_vec_i16 = 0x4b3ba5cdbadb541e;
+    static constexpr uint64_t Xor_vec_i16 = 0x51e5587912d014d8;
     static constexpr uint64_t Xor_vec_i32 = 0x5c92d5e3d8dec0a8;
     static constexpr uint64_t Xor_vec_i64 = 0x5b65623373691196;
     static constexpr uint64_t Shl_i8 = 0xcb71176a5fda261a;
@@ -135,8 +135,8 @@ struct InstructionPrimes {
     static constexpr uint64_t Shl_vec_i64 = 0x91a76a465de9d163;
     static constexpr uint64_t LShr_i8 = 0x554668ed91a7ec2d;
     static constexpr uint64_t LShr_i16 = 0xd094dd15a208d797;
-    static constexpr uint64_t LShr_i32 = 0x88330E6E1BFA5411;
-    static constexpr uint64_t LShr_i64 = 0x8374F43D807A6F91;
+    static constexpr uint64_t LShr_i32 = 0x21cf38cc21ec1aa8;
+    static constexpr uint64_t LShr_i64 = 0xb8b42b0acea289f4;
     static constexpr uint64_t LShr_vec_i8 = 0x0e6b9540fead6e5e;
     static constexpr uint64_t LShr_vec_i16 = 0xe80025d702be8e2a;
     static constexpr uint64_t LShr_vec_i32 = 0x560da37e0a8108af;
