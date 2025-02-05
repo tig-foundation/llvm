@@ -21,19 +21,19 @@ static bool isInstructionSafe(const Instruction &I)
 
     // Skip volatile memory operations as they might have special semantics
     if (auto* MI = dyn_cast<LoadInst>(&I))
-        //if (MI->isVolatile())
+        if (MI->isVolatile())
             return false;
 
     if (auto* MI = dyn_cast<StoreInst>(&I))
-        //if (MI->isVolatile())
+        if (MI->isVolatile())
             return false;
 
     // Skip vector operations that might be converted to NEON/SVE
-    if (auto* VL = dyn_cast<VectorType>(I.getType())) {
+    /*if (auto* VL = dyn_cast<VectorType>(I.getType())) {
         unsigned Width = VL->getPrimitiveSizeInBits();
         if (Width != 64 && Width != 128)
             return false;
-    }
+    }*/
 
     return true;
 }
@@ -779,7 +779,7 @@ public:
                         break;
                     }
 
-                    if (auto* FP = dyn_cast<FPMathOperator>(&I))
+                    /*if (auto* FP = dyn_cast<FPMathOperator>(&I))
                         if (FP->getFastMathFlags().any())
                         {
                             hasUnsafeInstr = true;
@@ -790,7 +790,7 @@ public:
                     {
                         hasUnsafeInstr = true;
                         break;
-                    }
+                    }*/
                 }
 
                 if (!hasUnsafeInstr)
@@ -821,7 +821,7 @@ public:
                         InstrSig = rotateLeft(rotateRight(getCmpPrime(CI), rightRot), leftRot);
                     else if (auto* Cast = dyn_cast<CastInst>(&I))
                         InstrSig = rotateLeft(rotateRight(getCastPrime(Cast), rightRot), leftRot);
-                    else if (auto* Load = dyn_cast<LoadInst>(&I)) {
+                    /*else if (auto* Load = dyn_cast<LoadInst>(&I)) {
                         Type* LoadTy = Load->getType();
                         if (LoadTy->isIntegerTy(32))
                             InstrSig = rotateLeft(rotateRight(InstructionPrimes::Load_i32, rightRot), leftRot);
@@ -842,7 +842,7 @@ public:
                             InstrSig = rotateLeft(rotateRight(InstructionPrimes::Store_f32, rightRot), leftRot);
                         else if (StoreTy->isDoubleTy())
                             InstrSig = rotateLeft(rotateRight(InstructionPrimes::Store_f64, rightRot), leftRot);
-                    }
+                    }*/
                     else if (auto* GEP = dyn_cast<GetElementPtrInst>(&I)) {
                         InstrSig = rotateLeft(rotateRight(InstructionPrimes::Load_i64, rightRot), leftRot);
                     }
