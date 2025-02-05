@@ -80,6 +80,10 @@ unsigned getIntrinsicCost(StringRef Name)
     if (Name.starts_with("llvm.vector.reduce"))
         return 4;
 
+    if (Name.starts_with("llvm.tan") || Name.starts_with("llvm.cosh") || 
+        Name.starts_with("llvm.sinh") || Name.starts_with("llvm.tanh"))
+        return 40;
+
     if (Name.starts_with("llvm.sin") || Name.starts_with("llvm.cos") || 
         Name.starts_with("llvm.pow"))
         return 35;
@@ -87,10 +91,6 @@ unsigned getIntrinsicCost(StringRef Name)
     if (Name.starts_with("llvm.log") || Name.starts_with("llvm.log2") ||
         Name.starts_with("llvm.log10"))
         return 25;
-
-    if (Name.starts_with("llvm.tan") || Name.starts_with("llvm.cosh") || 
-        Name.starts_with("llvm.sinh") || Name.starts_with("llvm.tanh"))
-        return 40;
         
     return 0;
 }
