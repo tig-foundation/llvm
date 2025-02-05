@@ -25,13 +25,15 @@ unsigned getIntrinsicCost(StringRef Name)
         return 8;*/
 
     if (Name.starts_with("llvm.fma"))
-        return 6;
+        return 5;
 
     if (Name.starts_with("llvm.bswap"))
         return 2;
 
-    if (Name.starts_with("llvm.ctlz") || Name.starts_with("llvm.cttz") || 
-        Name.starts_with("llvm.ctpop"))
+    if (Name.starts_with("llvm.ctpop"))
+        return 4;
+
+    if (Name.starts_with("llvm.ctlz") || Name.starts_with("llvm.cttz"))
         return 3;
 
     if (Name.starts_with("llvm.fshl") || Name.starts_with("llvm.fshr"))
@@ -41,9 +43,15 @@ unsigned getIntrinsicCost(StringRef Name)
         Name.starts_with("llvm.smin") || Name.starts_with("llvm.smax"))
         return 2;
 
-    if (Name.starts_with("llvm.arm.neon.vmins") || Name.starts_with("llvm.arm.neon.vminu") ||
-        Name.starts_with("llvm.arm.neon.vmaxs") || Name.starts_with("llvm.arm.neon.vmaxu") ||
-        Name.starts_with("llvm.arm.neon.vmaxv") || Name.starts_with("llvm.arm.neon.vminv"))
+    if (Name.starts_with("llvm.arm.neon.vmins") || 
+        Name.starts_with("llvm.arm.neon.vmaxs"))
+        return 3;
+
+    if (Name.starts_with("llvm.arm.neon.vminu") || 
+        Name.starts_with("llvm.arm.neon.vmaxu"))
+        return 2;
+
+    if (Name.starts_with("llvm.arm.neon.vmaxv") || Name.starts_with("llvm.arm.neon.vminv"))
         return 3;
 
     if (Name.starts_with("llvm.arm.neon.cmeq") || Name.starts_with("llvm.arm.neon.cmge") ||
@@ -51,42 +59,168 @@ unsigned getIntrinsicCost(StringRef Name)
         Name.starts_with("llvm.arm.neon.cmlt"))
         return 3;
 
-    if (Name.starts_with("llvm.abs") || Name.starts_with("llvm.fabs"))
+    if (Name.starts_with("llvm.abs"))
+        return 2;
+
+    if (Name.starts_with("llvm.fabs"))
         return 1;
 
-    if ((Name.starts_with("llvm.sqrt") || Name.starts_with("llvm.powi") || 
-        Name.starts_with("llvm.exp") || Name.starts_with("llvm.exp2"))
-        && !Name.starts_with("llvm.expect") && !Name.starts_with("llvm.experimental"))
+    if (Name.starts_with("llvm.sqrt"))
+        return 20;
+    
+    if (Name.starts_with("llvm.powi"))
         return 25;
 
-    if (Name.starts_with("llvm.round") || Name.starts_with("llvm.floor") ||
+    if (Name.starts_with("llvm.exp")
+        && !Name.starts_with("llvm.expect") && !Name.starts_with("llvm.experimental"))
+        return 30;
+
+    if (Name.starts_with("llvm.round"))
+        return 6;
+
+    if (Name.starts_with("llvm.floor") ||
         Name.starts_with("llvm.ceil"))
         return 5;
+
+    if (Name.starts_with("llvm.smul.with.overflow") || 
+        Name.starts_with("llvm.umul.with.overflow"))
+        return 3;
 
     if (Name.starts_with("llvm.sadd.with.overflow") || 
         Name.starts_with("llvm.uadd.with.overflow") ||
         Name.starts_with("llvm.ssub.with.overflow") || 
-        Name.starts_with("llvm.usub.with.overflow") ||
-        Name.starts_with("llvm.ssub.with.underflow") || 
-        Name.starts_with("llvm.usub.with.underflow") ||
-        Name.starts_with("llvm.smul.with.overflow") || 
-        Name.starts_with("llvm.umul.with.overflow"))
+        Name.starts_with("llvm.usub.with.overflow"))
         return 2;
 
     if (Name.starts_with("llvm.sadd.sat") || Name.starts_with("llvm.uadd.sat") ||
         Name.starts_with("llvm.ssub.sat") || Name.starts_with("llvm.usub.sat"))
         return 2;
 
-    if (Name.starts_with("llvm.vector.reduce"))
+    if (Name.starts_with("llvm.aarch64.neon.umaxp"))
+        return 3;
+
+    if (Name.starts_with("llvm.aarch64.neon.fmla") || 
+        Name.starts_with("llvm.aarch64.neon.fmls"))
         return 4;
 
-    if (Name.starts_with("llvm.tan") || Name.starts_with("llvm.cosh") || 
-        Name.starts_with("llvm.sinh") || Name.starts_with("llvm.tanh"))
+    if (Name.starts_with("llvm.aarch64.neon.vcge") || 
+        Name.starts_with("llvm.aarch64.neon.vcgt"))
+        return 3;
+
+    if (Name.starts_with("llvm.aarch64.neon.vceq"))
+        return 2;
+
+    if (Name.starts_with("llvm.aarch64.neon.vcage") ||
+        Name.starts_with("llvm.aarch64.neon.vcagt"))
+        return 2;
+
+    if (Name.starts_with("llvm.aarch64.neon.frint") || Name.starts_with("llvm.aarch64.neon.frecpe"))
+        return 3;
+
+    if (Name.starts_with("llvm.arm.neon.vrecpe") ||
+        Name.starts_with("llvm.arm.neon.vrsqrte"))
+        return 4;
+
+    if (Name.starts_with("llvm.arm.neon.vrecps") ||
+        Name.starts_with("llvm.arm.neon.vrsqrts"))
+        return 4;
+
+    if (Name.starts_with("llvm.aarch64.neon.vabs") ||
+        Name.starts_with("llvm.aarch64.neon.vneg"))
+        return 1;
+
+    if (Name.starts_with("llvm.aarch64.neon.vrecpx"))
+        return 4;
+
+    if (Name.starts_with("llvm.aarch64.neon.vqabs") ||
+        Name.starts_with("llvm.aarch64.neon.vqneg"))
+        return 2;
+
+    if (Name.starts_with("llvm.aarch64.neon.vqdmull") ||
+        Name.starts_with("llvm.aarch64.neon.vqdmlal") ||
+        Name.starts_with("llvm.aarch64.neon.vqdmlsl"))
+        return 5;
+
+    if (Name.starts_with("llvm.aarch64.neon.vqdmulh"))
+        return 4;
+
+    if (Name.starts_with("llvm.aarch64.neon.vsqadd") ||
+        Name.starts_with("llvm.aarch64.neon.vuqadd") ||
+        Name.starts_with("llvm.arm.neon.vqsub") ||
+        Name.starts_with("llvm.arm.neon.vqadd"))
+        return 3;
+
+    if (Name.starts_with("llvm.aarch64.neon.addp") ||
+        Name.starts_with("llvm.aarch64.neon.saddlp") ||
+        Name.starts_with("llvm.aarch64.neon.uaddlp"))
+        return 2;
+
+    if (Name.starts_with("llvm.aarch64.neon.pmul") ||
+        Name.starts_with("llvm.aarch64.neon.smull") ||
+        Name.starts_with("llvm.aarch64.neon.umull"))
+        return 4;
+
+    if (Name.starts_with("llvm.aarch64.neon.sqdmull") ||
+        Name.starts_with("llvm.aarch64.neon.sqrdmulh"))
+        return 5;
+
+    if (Name.starts_with("llvm.aarch64.neon.sha1"))
+        return 8;
+
+    if (Name.starts_with("llvm.aarch64.neon.sha256"))
+        return 10;
+
+    if (Name.starts_with("llvm.aarch64.neon.aese") ||
+        Name.starts_with("llvm.aarch64.neon.aesd"))
+        return 12;
+
+    if (Name.starts_with("llvm.aarch64.neon.fcvt"))
+        return 3;
+
+    if (Name.starts_with("llvm.aarch64.neon.rshrn") ||
+        Name.starts_with("llvm.aarch64.neon.sqshrn") ||
+        Name.starts_with("llvm.aarch64.neon.uqshrn"))
+        return 3;
+
+    if (Name.starts_with("llvm.aarch64.neon.sqshlu") ||
+        Name.starts_with("llvm.aarch64.neon.sqrshrun"))
+        return 4;
+
+    if (Name.starts_with("llvm.vector.reduce.add") || 
+        Name.starts_with("llvm.vector.reduce.and") || 
+        Name.starts_with("llvm.vector.reduce.or") || 
+        Name.starts_with("llvm.vector.reduce.xor"))
+        return 3;
+
+    if (Name.starts_with("llvm.vector.reduce.smax") || 
+        Name.starts_with("llvm.vector.reduce.smin") || 
+        Name.starts_with("llvm.vector.reduce.umax") || 
+        Name.starts_with("llvm.vector.reduce.umin"))
+        return 4;
+
+    if (Name.starts_with("llvm.vector.reduce.fmax") || 
+        Name.starts_with("llvm.vector.reduce.fmin"))
+        return 4;
+
+    if (Name.starts_with("llvm.vector.reduce.fadd"))
+        return 5;
+
+    if (Name.starts_with("llvm.vector.reduce.fmul"))
+        return 6;
+
+    if (Name.starts_with("llvm.tan"))
+        return 45;
+
+    if (Name.starts_with("llvm.cosh") || 
+        Name.starts_with("llvm.sinh") || 
+        Name.starts_with("llvm.tanh"))
         return 40;
 
-    if (Name.starts_with("llvm.sin") || Name.starts_with("llvm.cos") || 
-        Name.starts_with("llvm.pow"))
+    if (Name.starts_with("llvm.sin") || Name.starts_with("llvm.cos"))
         return 35;
+
+    if (Name.starts_with("llvm.pow"))
+        return 40;
 
     if (Name.starts_with("llvm.log") || Name.starts_with("llvm.log2") ||
         Name.starts_with("llvm.log10"))
@@ -97,6 +231,12 @@ unsigned getIntrinsicCost(StringRef Name)
 
     if (Name.starts_with("llvm.masked.gather") || Name.starts_with("llvm.masked.scatter"))
         return 6;
+
+    if (Name.starts_with("llvm.matrix.transpose"))
+        return 6;
+
+    if (Name.starts_with("llvm.matrix.multiply"))
+        return 10;
 
     if (Name.starts_with("llvm.matrix"))
         return 8;
