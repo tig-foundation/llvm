@@ -17,24 +17,231 @@ PreservedAnalyses FuelPass::run(Function &F, FunctionAnalysisManager &AM)
 
 unsigned getIntrinsicCost(StringRef Name)
 {
-    //if we are going to benchmark these, we should consider the len
-    /*if (Name.starts_with("llvm.memcpy") || Name.starts_with("llvm.memmove"))
-        return 10;
+    if (Name.starts_with("llvm.arm.neon") || Name.starts_with("llvm.aarch64.neon"))
+    {
+        if (Name.contains(".v4"))
+        {
+            if (Name.ends_with("f32"))
+            {
+                if (Name.contains(".vcge") || Name.contains(".vcgt"))
+                    return 3;
+                if (Name.contains(".vcage") || Name.contains(".vcagt"))
+                    return 3;
+                if (Name.contains(".vceq"))
+                    return 3;
+                if (Name.contains(".cmeq") || Name.contains(".cmge") || 
+                    Name.contains(".cmgt") || Name.contains(".cmle") || 
+                    Name.contains(".cmlt"))
+                    return 3;
+                if (Name.contains(".vmins") || Name.contains(".vmaxs") || 
+                    Name.contains(".umaxp") || Name.contains(".smaxp"))
+                    return 3;
+                if (Name.contains(".vminu") || Name.contains(".vmaxu"))
+                    return 3;
+                if (Name.contains(".vmaxv") || Name.contains(".vminv"))
+                    return 3;
+                if (Name.contains(".fmla") || Name.contains(".fmls"))
+                    return 4;
+                if (Name.contains(".frecpe") || Name.contains(".frint"))
+                    return 4;
+                if (Name.contains(".vrecpe") || Name.contains(".vrsqrte"))
+                    return 3;
+                if (Name.contains(".vrecps") || Name.contains(".vrsqrts"))
+                    return 3;
+                if (Name.contains(".vrecpx"))
+                    return 5;
+            }
+            else if (Name.ends_with("i32"))
+            {
+                if (Name.contains(".vcge") || Name.contains(".vcgt"))
+                    return 3;
+                if (Name.contains(".vceq"))
+                    return 3;
+                if (Name.contains(".cmeq") || Name.contains(".cmge") || 
+                    Name.contains(".cmgt") || Name.contains(".cmle") || 
+                    Name.contains(".cmlt"))
+                    return 3;
+                if (Name.contains(".vmins") || Name.contains(".vmaxs") || 
+                    Name.contains(".umaxp") || Name.contains(".smaxp"))
+                    return 3;
+                if (Name.contains(".vminu") || Name.contains(".vmaxu"))
+                    return 3;
+                if (Name.contains(".vmaxv") || Name.contains(".vminv"))
+                    return 3;
+                if (Name.contains(".vqdmull") || Name.contains(".vqdmlal") || 
+                    Name.contains(".vqdmlsl"))
+                    return 4;
+                if (Name.contains(".vqdmulh") || Name.contains(".sqrdmulh"))
+                    return 4;
+            }
+        }
+        else if (Name.contains(".v8"))
+        {
+            if (Name.ends_with("i16") || Name.ends_with("f16"))
+            {
+                if (Name.contains(".vcge") || Name.contains(".vcgt"))
+                    return 3;
+                if (Name.contains(".vcage") || Name.contains(".vcagt"))
+                    return 3;
+                if (Name.contains(".vceq"))
+                    return 3;
+                if (Name.contains(".cmeq") || Name.contains(".cmge") || 
+                    Name.contains(".cmgt") || Name.contains(".cmle") || 
+                    Name.contains(".cmlt"))
+                    return 3;
+                if (Name.contains(".vmins") || Name.contains(".vmaxs") || 
+                    Name.contains(".umaxp") || Name.contains(".smaxp"))
+                    return 3;
+                if (Name.contains(".vminu") || Name.contains(".vmaxu"))
+                    return 3;
+                if (Name.contains(".vmaxv") || Name.contains(".vminv"))
+                    return 3;
+                if (Name.contains(".vqdmull") || Name.contains(".vqdmlal") || 
+                    Name.contains(".vqdmlsl"))
+                    return 4;
+                if (Name.contains(".vqdmulh") || Name.contains(".sqrdmulh"))
+                    return 4;
+            }
+            else if (Name.ends_with("i8"))
+            {
+                if (Name.contains(".vcge") || Name.contains(".vcgt"))
+                    return 3;
+                if (Name.contains(".vceq"))
+                    return 3;
+                if (Name.contains(".cmeq") || Name.contains(".cmge") || 
+                    Name.contains(".cmgt") || Name.contains(".cmle") || 
+                    Name.contains(".cmlt"))
+                    return 3;
+                if (Name.contains(".vmins") || Name.contains(".vmaxs") || 
+                    Name.contains(".umaxp") || Name.contains(".smaxp"))
+                    return 3;
+                if (Name.contains(".vminu") || Name.contains(".vmaxu"))
+                    return 3;
+                if (Name.contains(".vmaxv") || Name.contains(".vminv"))
+                    return 3;
+            }
+        }
+        else if (Name.contains(".v16"))
+        {
+            if (Name.ends_with("i8"))
+            {
+                if (Name.contains(".vcge") || Name.contains(".vcgt"))
+                    return 3;
+                if (Name.contains(".vceq"))
+                    return 3;
+                if (Name.contains(".cmeq") || Name.contains(".cmge") || 
+                    Name.contains(".cmgt") || Name.contains(".cmle") || 
+                    Name.contains(".cmlt"))
+                    return 3;
+                if (Name.contains(".vmins") || Name.contains(".vmaxs") || 
+                    Name.contains(".umaxp") || Name.contains(".smaxp"))
+                    return 3;
+                if (Name.contains(".vminu") || Name.contains(".vmaxu"))
+                    return 3;
+                if (Name.contains(".vmaxv") || Name.contains(".vminv"))
+                    return 3;
+            }
+        }
 
-    if (Name.starts_with("llvm.memset"))
-        return 8;*/
+        if (Name.contains(".addp") || Name.contains(".saddlp") || 
+            Name.contains(".uaddlp"))
+        {
+            if (Name.contains(".v4"))
+                return 2;
+            if (Name.contains(".v8"))
+                return 2;
+            if (Name.contains(".v16"))
+                return 2;
+            return 2;
+        }
+
+        if (Name.contains(".pmul") || Name.contains(".smull") || 
+            Name.contains(".umull"))
+        {
+            if (Name.contains(".v4"))
+                return 4;
+            if (Name.contains(".v8"))
+                return 4;
+            return 4;
+        }
+
+        if (Name.contains(".vabs") || Name.contains(".vneg"))
+            return 1;
+        if (Name.contains(".vqabs") || Name.contains(".vqneg"))
+            return 2;
+        if (Name.contains(".vsqadd") || Name.contains(".vuqadd") || 
+            Name.contains(".vqsub") || Name.contains(".vqadd"))
+            return 3;
+        if (Name.contains(".fcvt"))
+            return 3;
+        if (Name.contains(".rshrn") || Name.contains(".sqshrn") || 
+            Name.contains(".uqshrn"))
+            return 3;
+        if (Name.contains(".sqshlu") || Name.contains(".sqrshrun"))
+            return 4;
+    }
+
+    if (Name.starts_with("llvm.vector.reduce"))
+    {
+        if (Name.contains(".add") || Name.contains(".mul"))
+        {
+            if (Name.contains(".v4"))
+                return 5;
+            if (Name.contains(".v8"))
+                return 7;
+            if (Name.contains(".v16"))
+                return 9;
+        }
+        if (Name.contains(".fadd") || Name.contains(".fmul"))
+        {
+            if (Name.contains(".v4"))
+                return 9;
+            if (Name.contains(".v8"))
+                return 11;
+        }
+    }
+
+    if (Name.starts_with("llvm.masked.load"))
+    {
+        if (Name.contains(".v4"))
+            return 5;
+        if (Name.contains(".v8"))
+            return 6;
+        if (Name.contains(".v16"))
+            return 8;
+    }
+
+    if (Name.starts_with("llvm.masked.store"))
+    {
+        if (Name.contains(".v4"))
+            return 3;
+        if (Name.contains(".v8"))
+            return 4;
+        if (Name.contains(".v16"))
+            return 6;
+    }
+
+    if (Name.starts_with("llvm.aarch64.crypto"))
+    {
+        if (Name.contains("aes"))
+            return 3;
+        if (Name.contains("sha1"))
+            return 6;
+        if (Name.contains("sha256"))
+            return 6;
+    }
 
     if (Name.starts_with("llvm.fma"))
-        return 5;
+        return 9;
 
     if (Name.starts_with("llvm.bswap"))
-        return 2;
+        return 1;
 
     if (Name.starts_with("llvm.ctpop"))
-        return 4;
+        return 3;
 
     if (Name.starts_with("llvm.ctlz") || Name.starts_with("llvm.cttz"))
-        return 3;
+        return 1;
 
     if (Name.starts_with("llvm.fshl") || Name.starts_with("llvm.fshr"))
         return 2;
@@ -43,22 +250,6 @@ unsigned getIntrinsicCost(StringRef Name)
         Name.starts_with("llvm.smin") || Name.starts_with("llvm.smax"))
         return 2;
 
-    if (Name.starts_with("llvm.arm.neon.vmins") || 
-        Name.starts_with("llvm.arm.neon.vmaxs"))
-        return 3;
-
-    if (Name.starts_with("llvm.arm.neon.vminu") || 
-        Name.starts_with("llvm.arm.neon.vmaxu"))
-        return 2;
-
-    if (Name.starts_with("llvm.arm.neon.vmaxv") || Name.starts_with("llvm.arm.neon.vminv"))
-        return 3;
-
-    if (Name.starts_with("llvm.arm.neon.cmeq") || Name.starts_with("llvm.arm.neon.cmge") ||
-        Name.starts_with("llvm.arm.neon.cmgt") || Name.starts_with("llvm.arm.neon.cmle") ||
-        Name.starts_with("llvm.arm.neon.cmlt"))
-        return 3;
-
     if (Name.starts_with("llvm.abs"))
         return 2;
 
@@ -66,7 +257,7 @@ unsigned getIntrinsicCost(StringRef Name)
         return 1;
 
     if (Name.starts_with("llvm.sqrt"))
-        return 20;
+        return 15;
     
     if (Name.starts_with("llvm.powi"))
         return 25;
@@ -95,6 +286,52 @@ unsigned getIntrinsicCost(StringRef Name)
     if (Name.starts_with("llvm.sadd.sat") || Name.starts_with("llvm.uadd.sat") ||
         Name.starts_with("llvm.ssub.sat") || Name.starts_with("llvm.usub.sat"))
         return 2;
+
+    if (Name.starts_with("llvm.tan"))
+        return 45;
+
+    if (Name.starts_with("llvm.cosh") || 
+        Name.starts_with("llvm.sinh") || 
+        Name.starts_with("llvm.tanh"))
+        return 40;
+
+    if (Name.starts_with("llvm.sin") || Name.starts_with("llvm.cos"))
+        return 35;
+
+    if (Name.starts_with("llvm.pow"))
+        return 40;
+
+    if (Name.starts_with("llvm.log") || Name.starts_with("llvm.log2") ||
+        Name.starts_with("llvm.log10"))
+        return 25;
+
+    if (Name.starts_with("llvm.masked.gather") || Name.starts_with("llvm.masked.scatter"))
+        return 8;
+
+    if (Name.starts_with("llvm.matrix.transpose"))
+        return 6;
+
+    if (Name.starts_with("llvm.matrix.multiply"))
+        return 10;
+
+    if (Name.starts_with("llvm.matrix"))
+        return 8;
+
+    if (Name.starts_with("llvm.arm.neon.vmins") || 
+        Name.starts_with("llvm.arm.neon.vmaxs"))
+        return 3;
+
+    if (Name.starts_with("llvm.arm.neon.vminu") || 
+        Name.starts_with("llvm.arm.neon.vmaxu"))
+        return 2;
+
+    if (Name.starts_with("llvm.arm.neon.vmaxv") || Name.starts_with("llvm.arm.neon.vminv"))
+        return 3;
+
+    if (Name.starts_with("llvm.arm.neon.cmeq") || Name.starts_with("llvm.arm.neon.cmge") ||
+        Name.starts_with("llvm.arm.neon.cmgt") || Name.starts_with("llvm.arm.neon.cmle") ||
+        Name.starts_with("llvm.arm.neon.cmlt"))
+        return 3;
 
     if (Name.starts_with("llvm.aarch64.neon.umaxp"))
         return 3;
@@ -164,15 +401,9 @@ unsigned getIntrinsicCost(StringRef Name)
         Name.starts_with("llvm.aarch64.neon.sqrdmulh"))
         return 5;
 
-    if (Name.starts_with("llvm.aarch64.neon.sha1"))
-        return 8;
-
-    if (Name.starts_with("llvm.aarch64.neon.sha256"))
-        return 10;
-
     if (Name.starts_with("llvm.aarch64.neon.aese") ||
         Name.starts_with("llvm.aarch64.neon.aesd"))
-        return 12;
+        return 3;
 
     if (Name.starts_with("llvm.aarch64.neon.fcvt"))
         return 3;
@@ -186,60 +417,21 @@ unsigned getIntrinsicCost(StringRef Name)
         Name.starts_with("llvm.aarch64.neon.sqrshrun"))
         return 4;
 
-    if (Name.starts_with("llvm.vector.reduce.add") || 
-        Name.starts_with("llvm.vector.reduce.and") || 
-        Name.starts_with("llvm.vector.reduce.or") || 
-        Name.starts_with("llvm.vector.reduce.xor"))
-        return 3;
-
     if (Name.starts_with("llvm.vector.reduce.smax") || 
         Name.starts_with("llvm.vector.reduce.smin") || 
         Name.starts_with("llvm.vector.reduce.umax") || 
         Name.starts_with("llvm.vector.reduce.umin"))
-        return 4;
+        return 7;
 
     if (Name.starts_with("llvm.vector.reduce.fmax") || 
         Name.starts_with("llvm.vector.reduce.fmin"))
-        return 4;
-
-    if (Name.starts_with("llvm.vector.reduce.fadd"))
-        return 5;
-
-    if (Name.starts_with("llvm.vector.reduce.fmul"))
-        return 6;
-
-    if (Name.starts_with("llvm.tan"))
-        return 45;
-
-    if (Name.starts_with("llvm.cosh") || 
-        Name.starts_with("llvm.sinh") || 
-        Name.starts_with("llvm.tanh"))
-        return 40;
-
-    if (Name.starts_with("llvm.sin") || Name.starts_with("llvm.cos"))
-        return 35;
-
-    if (Name.starts_with("llvm.pow"))
-        return 40;
-
-    if (Name.starts_with("llvm.log") || Name.starts_with("llvm.log2") ||
-        Name.starts_with("llvm.log10"))
-        return 25;
-
-    if (Name.starts_with("llvm.masked.load") || Name.starts_with("llvm.masked.store"))
-        return 4;
-
-    if (Name.starts_with("llvm.masked.gather") || Name.starts_with("llvm.masked.scatter"))
-        return 6;
-
-    if (Name.starts_with("llvm.matrix.transpose"))
-        return 6;
-
-    if (Name.starts_with("llvm.matrix.multiply"))
         return 10;
 
-    if (Name.starts_with("llvm.matrix"))
-        return 8;
+    if (Name.starts_with("llvm.vector.reduce.fadd"))
+        return 9;
+
+    if (Name.starts_with("llvm.vector.reduce.fmul"))
+        return 10;
         
     return 0;
 }
@@ -273,29 +465,29 @@ unsigned getFuelCost(Instruction &I)
 
         case Instruction::UDiv:
         case Instruction::SDiv:
-            baseCost = 8;
+            baseCost = 12;
             break;
 
         case Instruction::URem:
         case Instruction::SRem:
-            baseCost = 10;
+            baseCost = 15;
             break;
 
         case Instruction::FAdd:
         case Instruction::FSub:
-            baseCost = 2;
+            baseCost = 5;
             break;
 
         case Instruction::FMul:
-            baseCost = 4;
+            baseCost = 5;
             break;
 
         case Instruction::FDiv:
-            baseCost = 12;
+            baseCost = 17;
             break;
 
         case Instruction::FRem:
-            baseCost = 15;
+            baseCost = 20;
             break;
 
         /*case Instruction::Load:
@@ -337,12 +529,12 @@ unsigned getFuelCost(Instruction &I)
             break;
 
         case Instruction::FCmp:
-            baseCost = 2;
+            baseCost = 3;
             break;
 
         case Instruction::ExtractElement:
         case Instruction::InsertElement:
-            baseCost = 2;
+            baseCost = 3;
             break;
 
         case Instruction::ShuffleVector:
@@ -350,7 +542,7 @@ unsigned getFuelCost(Instruction &I)
             break;
 
         case Instruction::Select:
-            baseCost = 2;
+            baseCost = 3;
             break;
 
         default:
