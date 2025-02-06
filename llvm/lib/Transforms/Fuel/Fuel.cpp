@@ -614,6 +614,21 @@ unsigned getFuelCost(Instruction &I)
         {
             if (Callee->isIntrinsic())
                 return getIntrinsicCost(Callee->getName());
+
+            if (Callee->getName() == "__check_fuel")
+                return 0;
+
+            unsigned Cost = 3;
+            Cost += std::min(8u, Call->arg_size());
+            
+            return Cost;
+        }
+        else
+        {
+            unsigned Cost = 5;
+            Cost += std::min(8u, Call->arg_size());
+            
+            return Cost;
         }
     }
 
