@@ -19,7 +19,40 @@ unsigned getIntrinsicCost(StringRef Name)
 {
     if (Name.starts_with("llvm.arm.neon") || Name.starts_with("llvm.aarch64.neon"))
     {
-        if (Name.contains(".v4"))
+        if (Name.contains(".v2"))
+        {
+            if (Name.ends_with("f64") || Name.ends_with("i64"))
+            {
+                if (Name.contains(".vcge") || Name.contains(".vcgt"))
+                    return 3;
+                if (Name.contains(".vcage") || Name.contains(".vcagt"))
+                    return 3;
+                if (Name.contains(".vceq"))
+                    return 3;
+                if (Name.contains(".cmeq") || Name.contains(".cmge") || 
+                    Name.contains(".cmgt") || Name.contains(".cmle") || 
+                    Name.contains(".cmlt"))
+                    return 3;
+                if (Name.contains(".vmins") || Name.contains(".vmaxs") || 
+                    Name.contains(".umaxp") || Name.contains(".smaxp"))
+                    return 3;
+                if (Name.contains(".vminu") || Name.contains(".vmaxu"))
+                    return 3;
+                if (Name.contains(".vmaxv") || Name.contains(".vminv"))
+                    return 3;
+                if (Name.contains(".fmla") || Name.contains(".fmls"))
+                    return 4;
+                if (Name.contains(".frecpe") || Name.contains(".frint"))
+                    return 4;
+                if (Name.contains(".vrecpe") || Name.contains(".vrsqrte"))
+                    return 3;
+                if (Name.contains(".vrecps") || Name.contains(".vrsqrts"))
+                    return 3;
+                if (Name.contains(".vrecpx"))
+                    return 5;
+            }
+        }
+        else if (Name.contains(".v4"))
         {
             if (Name.ends_with("f32"))
             {
@@ -142,6 +175,27 @@ unsigned getIntrinsicCost(StringRef Name)
                     return 3;
             }
         }
+        else if (Name.contains(".v32"))
+        {
+            if (Name.ends_with("i8"))
+            {
+                if (Name.contains(".vcge") || Name.contains(".vcgt"))
+                    return 3;
+                if (Name.contains(".vceq"))
+                    return 3;
+                if (Name.contains(".cmeq") || Name.contains(".cmge") || 
+                    Name.contains(".cmgt") || Name.contains(".cmle") || 
+                    Name.contains(".cmlt"))
+                    return 3;
+                if (Name.contains(".vmins") || Name.contains(".vmaxs") || 
+                    Name.contains(".umaxp") || Name.contains(".smaxp"))
+                    return 3;
+                if (Name.contains(".vminu") || Name.contains(".vmaxu"))
+                    return 3;
+                if (Name.contains(".vmaxv") || Name.contains(".vminv"))
+                    return 3;
+            }
+        }
 
         if (Name.contains(".addp") || Name.contains(".saddlp") || 
             Name.contains(".uaddlp"))
@@ -179,6 +233,115 @@ unsigned getIntrinsicCost(StringRef Name)
             return 3;
         if (Name.contains(".sqshlu") || Name.contains(".sqrshrun"))
             return 4;
+
+        if (Name.contains(".vext"))
+            return 3;
+        if (Name.contains(".vrev"))
+            return 1;
+        if (Name.contains(".vzip") || Name.contains(".vuzp"))
+            return 3;
+        if (Name.contains(".vtrn"))
+            return 3;
+
+        if (Name.contains(".vtbl") || Name.contains(".vtbx"))
+        {
+            if (Name.contains(".v8") || Name.contains(".v16"))
+                return 6;
+            return 3;
+        }
+
+        if (Name.contains(".vld1"))
+        {
+            if (Name.contains(".lane"))
+                return 8;
+            return 4;
+        }
+        if (Name.contains(".vst1"))
+        {
+            if (Name.contains(".lane"))
+                return 3;
+            return 1;
+        }
+        if (Name.contains(".vld2"))
+        {
+            if (Name.contains(".lane"))
+                return 8;
+            return 8;
+        }
+        if (Name.contains(".vst2"))
+        {
+            if (Name.contains(".lane"))
+                return 3;
+            return 3;
+        }
+        if (Name.contains(".vld3"))
+        {
+            if (Name.contains(".lane"))
+                return 8;
+            return 9;
+        }
+        if (Name.contains(".vst3"))
+        {
+            if (Name.contains(".lane"))
+                return 3;
+            return 3;
+        }
+        if (Name.contains(".vld4"))
+        {
+            if (Name.contains(".lane"))
+                return 8;
+            return 9;
+        }
+        if (Name.contains(".vst4"))
+        {
+            if (Name.contains(".lane"))
+                return 3;
+            return 4;
+        }
+
+        if (Name.contains(".vshl") || Name.contains(".vshr"))
+            return 2;
+
+        if (Name.contains(".vcvt"))
+            return 3;
+
+        if (Name.contains(".vset_lane"))
+            return 2;
+        if (Name.contains(".vget_lane"))
+            return 2;
+
+        if (Name.contains(".vadd_acc") || Name.contains(".vmla_acc"))
+            return 4;
+
+        if (Name.contains(".sdot") || Name.contains(".udot"))
+            return 4;
+
+        if (Name.contains(".vmul"))
+        {
+            if (Name.ends_with("f64") || Name.ends_with("f32"))
+                return 4;
+            return 3;
+        }
+
+        if (Name.contains(".vdiv"))
+        {
+            if (Name.ends_with("f64"))
+                return 17;
+            if (Name.ends_with("f32"))
+                return 12;
+        }
+
+        if (Name.contains(".vdup_lane"))
+            return 2;
+
+        if (Name.contains(".vtbl2") || Name.contains(".vtbx2"))
+            return 4;
+
+        if (Name.contains(".vpadd"))
+            return 2;
+
+        if (Name.contains(".vpmax") || Name.contains(".vpmin"))
+            return 2;
     }
 
     if (Name.starts_with("llvm.vector.reduce"))
@@ -198,6 +361,8 @@ unsigned getIntrinsicCost(StringRef Name)
                 return 9;
             if (Name.contains(".v8"))
                 return 11;
+            if (Name.contains(".v16"))
+                return 13;
         }
     }
 
