@@ -452,6 +452,7 @@ unsigned getFuelCost(Instruction &I)
         }
     }
 
+    bool isFloatingOp = false;
     switch (I.getOpcode())
     {
         case Instruction::Add:
@@ -475,18 +476,22 @@ unsigned getFuelCost(Instruction &I)
 
         case Instruction::FAdd:
         case Instruction::FSub:
+            isFloatingOp = true;
             baseCost = 5;
             break;
 
         case Instruction::FMul:
-            baseCost = 5;
+            isFloatingOp = true;
+            baseCost = 7;
             break;
 
         case Instruction::FDiv:
+            isFloatingOp = true;
             baseCost = 17;
             break;
 
         case Instruction::FRem:
+            isFloatingOp = true;
             baseCost = 20;
             break;
 
@@ -509,6 +514,7 @@ unsigned getFuelCost(Instruction &I)
             break;*/
 
         case Instruction::FNeg:
+            isFloatingOp = true;
             baseCost = 1;
             break;
 
@@ -529,6 +535,7 @@ unsigned getFuelCost(Instruction &I)
             break;
 
         case Instruction::FCmp:
+            isFloatingOp = true;
             baseCost = 3;
             break;
 
@@ -549,10 +556,18 @@ unsigned getFuelCost(Instruction &I)
             return 0;
     }
 
-    if (isFloat && isVector)
-        baseCost *= 3;
-    else if (isFloat || isVector)
-        baseCost *= 2;
+    if(!isFloatingOp)
+    {
+        if (isFloat && isVector)
+            baseCost *= 3;
+        else if (isFloat || isVector)
+            baseCost *= 2;
+    }
+    else
+    {
+        if (isVector)
+            baseCost *= 2;
+    }
 
     return baseCost;
 }
