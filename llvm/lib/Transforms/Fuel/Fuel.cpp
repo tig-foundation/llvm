@@ -731,7 +731,7 @@ unsigned getFuelCost(Instruction &I)
     else
     {
         if (isVector)
-            baseCost *= 2;
+            baseCost = (baseCost * 5) / 2; // 2.5x
     }
 
     return baseCost;
