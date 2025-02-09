@@ -918,6 +918,18 @@ PassPluginLibraryInfo getRuntimeSignaturePluginInfo()
                     return false;
                 }
             );
+
+            const char* forceRunPassesStr = std::getenv("FORCE_RUN_PASSES");
+            int forceRunPasses = forceRunPassesStr ? std::atoi(forceRunPassesStr) : 0;
+            if (forceRunPasses)
+            {
+                PB.registerOptimizerLastEPCallback(
+                    [](ModulePassManager &MPM, OptimizationLevel Level) 
+                    {
+                        MPM.addPass(OperandsRuntimeSignaturePass());
+                    }
+                );
+            }
         }
     };
 }
