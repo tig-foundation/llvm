@@ -11,6 +11,14 @@ on:
           - aarch64
           - x86_64
         default: 'aarch64'
+      os:
+        description: 'Target OS'
+        required: true
+        type: choice
+        options:
+          - linux
+          - macos
+        default: 'linux'
       release_tag:
         description: 'Release tag name'
         required: false
@@ -35,15 +43,20 @@ on:
 jobs:
   build:
     permissions: write-all
-    runs-on: ${{ inputs.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
-    container:
-      image: debian:12
+    runs-on: ${{ inputs.os == 'macos' && 'macos-latest' || (inputs.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest') }}
+    container: ${{ inputs.os == 'linux' && 'debian:12' || '' }}
 
     steps:
       - name: Install system dependencies
+        if: inputs.os == 'linux'
         run: |
           apt-get update
           apt-get install -y build-essential clang cmake tar zstd gh git
+
+      - name: Install system dependencies (macOS)
+        if: inputs.os == 'macos'
+        run: |
+          brew install cmake zstd gh
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -52,7 +65,7 @@ jobs:
         run: chmod +x build-llvm.sh
 
       - name: Build LLVM
-        run: BUILD_JOBS=$(nproc) ./build-llvm.sh
+        run: BUILD_JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc) ./build-llvm.sh
 
       - name: Prepare build artifacts
         run: |
@@ -81,7 +94,7 @@ jobs:
           echo "release_title=$RELEASE_TITLE" >> $GITHUB_OUTPUT
 
           SHA256=$(cat llvm.tar.zst.sig)
-          RELEASE_NOTES="LLVM build (commit: ${{ github.sha }}, arch: ${{ inputs.arch }})"
+          RELEASE_NOTES="LLVM build (commit: ${{ github.sha }}, arch: ${{ inputs.arch }}, os: ${{ inputs.os }})"
           RELEASE_NOTES="$RELEASE_NOTES\n\nSHA256: $SHA256"
           if [ -n "${{ inputs.release_notes }}" ]; then
             RELEASE_NOTES="$RELEASE_NOTES\n\n${{ inputs.release_notes }}"
