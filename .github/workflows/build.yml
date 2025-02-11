@@ -73,7 +73,12 @@ jobs:
           tar --zstd -cf llvm.tar.zst llvm
 
       - name: Generate checksum
-        run: sha256sum llvm.tar.zst > llvm.tar.zst.sig
+        run: |
+          if [ "${{ inputs.os }}" = "macos" ]; then
+            shasum -a 256 llvm.tar.zst > llvm.tar.zst.sig
+          else
+            sha256sum llvm.tar.zst > llvm.tar.zst.sig
+          fi
 
       - name: Configure git
         run: git config --global --add safe.directory "$(realpath .)"
