@@ -491,7 +491,15 @@ unsigned getIntrinsicCost(StringRef Name)
         return 6;
 
     if (Name.starts_with("llvm.matrix.multiply"))
-        return 10;
+    {
+        if (Name.contains(".v2"))
+            return 15;
+        if (Name.contains(".v4"))
+            return 25;
+        if (Name.contains(".v8"))
+            return 40;
+        return 20;
+    }
 
     if (Name.starts_with("llvm.matrix"))
         return 8;
@@ -625,23 +633,23 @@ unsigned getIntrinsicCost(StringRef Name)
     if (Name.starts_with("llvm.vector.reduce.add"))
     {
         if (Name.contains(".v2"))
-            return 2;
+            return 3;
         if (Name.contains(".v4"))
-            return 4;
-        if (Name.contains(".v8"))
             return 6;
-        return 5;
+        if (Name.contains(".v8"))
+            return 9;
+        return 7;
     }
 
     if (Name.starts_with("llvm.vector.reduce.mul"))
     {
         if (Name.contains(".v2"))
-            return 6;
-        if (Name.contains(".v4"))
             return 8;
+        if (Name.contains(".v4"))
+            return 12;
         if (Name.contains(".v8"))
-            return 10;
-        return 10;
+            return 16;
+        return 14;
     }
 
     if (Name.starts_with("llvm.vector.reduce.sub"))
