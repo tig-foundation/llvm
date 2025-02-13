@@ -397,10 +397,24 @@ unsigned getIntrinsicCost(StringRef Name)
     }
 
     if (Name.starts_with("llvm.fma"))
-        return 9;
+    {
+        if (Name.contains(".v2"))
+            return 8;
+        if (Name.contains(".v4"))
+            return 12;
+        if (Name.contains(".v8"))
+            return 16;
+        return 4;
+    }
 
     if (Name.starts_with("llvm.bswap"))
+    {
+        if (Name.contains("i128"))
+            return 2;
+        if (Name.contains(".v"))
+            return 3;
         return 1;
+    }
 
     if (Name.starts_with("llvm.ctpop"))
         return 3;
@@ -586,18 +600,77 @@ unsigned getIntrinsicCost(StringRef Name)
         Name.starts_with("llvm.vector.reduce.smin") || 
         Name.starts_with("llvm.vector.reduce.umax") || 
         Name.starts_with("llvm.vector.reduce.umin"))
+    {
+        if (Name.contains(".v2"))
+            return 4;
+        if (Name.contains(".v4"))
+            return 6;
+        if (Name.contains(".v8"))
+            return 8;
         return 7;
+    }
 
     if (Name.starts_with("llvm.vector.reduce.fmax") || 
         Name.starts_with("llvm.vector.reduce.fmin"))
+    {
+        if (Name.contains(".v2"))
+            return 6;
+        if (Name.contains(".v4"))
+            return 8;
+        if (Name.contains(".v8"))
+            return 10;
         return 10;
+    }
 
-    if (Name.starts_with("llvm.vector.reduce.fadd"))
+    if (Name.starts_with("llvm.vector.reduce.add"))
+    {
+        if (Name.contains(".v2"))
+            return 2;
+        if (Name.contains(".v4"))
+            return 4;
+        if (Name.contains(".v8"))
+            return 6;
+        return 5;
+    }
+
+    if (Name.starts_with("llvm.vector.reduce.mul"))
+    {
+        if (Name.contains(".v2"))
+            return 6;
+        if (Name.contains(".v4"))
+            return 8;
+        if (Name.contains(".v8"))
+            return 10;
+        return 10;
+    }
+
+    if (Name.starts_with("llvm.vector.reduce.sub"))
+    {
+        if (Name.contains(".v2"))
+            return 3;
+        if (Name.contains(".v4"))
+            return 5;
+        if (Name.contains(".v8"))
+            return 7;
         return 9;
+    }
 
-    if (Name.starts_with("llvm.vector.reduce.fmul"))
+    if (Name.starts_with("llvm.vector.reduce.div"))
+    {
+        if (Name.contains(".v2"))
+            return 12;
+        if (Name.contains(".v4"))
+            return 16;
+        if (Name.contains(".v8"))
+            return 20;
         return 10;
+    }
+
+    if (Name.starts_with("llvm.minnum.f32") || Name.starts_with("llvm.minnum.f64")
+        || Name.starts_with("llvm.maxnum.f32") || Name.starts_with("llvm.maxnum.f64"))
+        return 3;
         
+
     return 0;
 }
 
