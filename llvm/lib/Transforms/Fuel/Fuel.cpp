@@ -890,6 +890,8 @@ unsigned getIntrinsicCost(StringRef Name)
         }
     }
 
+    errs() << "Unhandled intrinsic: " << Name << "\n";
+
     return 0;
 }
 
