@@ -441,11 +441,17 @@ unsigned getIntrinsicCost(StringRef Name)
     if (Name.starts_with("llvm.powi"))
         return 25;
 
+    if(Name.starts_with("llvm.exp2"))
+        return 25;
+
+    if(Name.starts_with("llvm.exp10"))
+        return 35;
+
     if (Name.starts_with("llvm.exp")
         && !Name.starts_with("llvm.expect") && !Name.starts_with("llvm.experimental"))
-        return 30;
+        return 35;
 
-    if (Name.starts_with("llvm.round"))
+    if (Name.starts_with("llvm.round") || Name.starts_with("llvm.roundeven"))
         return 6;
 
     if (Name.starts_with("llvm.floor") ||
@@ -469,10 +475,33 @@ unsigned getIntrinsicCost(StringRef Name)
     if (Name.starts_with("llvm.tan"))
         return 45;
 
+    if(Name.starts_with("llvm.atan2"))
+        return 65;
+
+    if(Name.starts_with("llvm.atan"))
+        return 50;
+        
     if (Name.starts_with("llvm.cosh") || 
         Name.starts_with("llvm.sinh") || 
         Name.starts_with("llvm.tanh"))
         return 40;
+
+    if(Name.starts_with("llvm.sincospi"))
+        return 75;
+
+    if(Name.starts_with("llvm.sincos"))
+        return 60;
+
+    if (Name.starts_with("llvm.asin") || Name.starts_with("llvm.acos"))
+        return 50;
+
+    if (Name.starts_with("llvm.modf"))
+    {
+        if (Name.contains(".f64"))
+            return 9;
+        if (Name.contains(".f32"))
+            return 5;
+    }
 
     if (Name.starts_with("llvm.sin") || Name.starts_with("llvm.cos"))
         return 35;
@@ -480,9 +509,12 @@ unsigned getIntrinsicCost(StringRef Name)
     if (Name.starts_with("llvm.pow"))
         return 40;
 
-    if (Name.starts_with("llvm.log") || Name.starts_with("llvm.log2") ||
-        Name.starts_with("llvm.log10"))
+    if (Name.starts_with("llvm.log2"))
+        return 23;
+    if (Name.starts_with("llvm.log10"))
         return 25;
+    if (Name.starts_with("llvm.log"))
+        return 24;
 
     if (Name.starts_with("llvm.masked.gather") || Name.starts_with("llvm.masked.scatter"))
         return 8;
@@ -618,6 +650,20 @@ unsigned getIntrinsicCost(StringRef Name)
         return 7;
     }
 
+    if (Name.starts_with("llvm.vector.reduce.or") || 
+        Name.starts_with("llvm.vector.reduce.xor") ||
+        Name.starts_with("llvm.vector.reduce.and") ||
+        Name.starts_with("llvm.vector.reduce.not"))
+    {
+        if (Name.contains(".v2"))
+            return 4;
+        if (Name.contains(".v4"))
+            return 6;
+        if (Name.contains(".v8"))
+            return 8;
+        return 7;
+    }
+
     if (Name.starts_with("llvm.vector.reduce.fmax") || 
         Name.starts_with("llvm.vector.reduce.fmin"))
     {
@@ -663,21 +709,186 @@ unsigned getIntrinsicCost(StringRef Name)
         return 9;
     }
 
-    if (Name.starts_with("llvm.vector.reduce.div"))
+    if (Name.starts_with("llvm.minnum") || Name.starts_with("llvm.maxnum"))
     {
         if (Name.contains(".v2"))
-            return 12;
+            return 6;
         if (Name.contains(".v4"))
-            return 16;
+            return 8;
         if (Name.contains(".v8"))
-            return 20;
-        return 10;
+            return 10;
+        if (Name.contains(".f32"))
+            return 3;
+        if (Name.contains(".f64"))
+            return 5;
+        return 2;
+    }   
+
+    if(Name.starts_with("llvm.lround") || Name.starts_with("llvm.llround"))
+    {
+        if (Name.contains(".f32"))
+            return 3;
+        if (Name.contains(".f64"))
+            return 5;
+        return 2;
     }
 
-    if (Name.starts_with("llvm.minnum.f32") || Name.starts_with("llvm.minnum.f64")
-        || Name.starts_with("llvm.maxnum.f32") || Name.starts_with("llvm.maxnum.f64"))
-        return 3;
-        
+    if (Name.starts_with("llvm.minimumnum") || Name.starts_with("llvm.maximumnum"))
+    {
+        if (Name.contains(".v2"))
+            return 6;
+        if (Name.contains(".v4"))
+            return 8;
+        if (Name.contains(".v8"))
+            return 10;
+        if (Name.contains(".f32"))
+            return 3;
+        if (Name.contains(".f64"))
+            return 5;
+        return 2;
+    }   
+    
+    if (Name.starts_with("llvm.minimum") || Name.starts_with("llvm.maximum"))
+    {
+        if (Name.contains(".v2"))
+            return 6;
+        if (Name.contains(".v4"))
+            return 8;
+        if (Name.contains(".v8"))
+            return 10;
+        if (Name.contains(".f32"))
+            return 3;
+        if (Name.contains(".f64"))
+            return 5;
+        return 2;
+    }
+
+    if(Name.starts_with("llvm.rint") || Name.starts_with("llvm.nearbyint"))
+    {
+        if (Name.contains(".f32"))
+            return 3;
+        if (Name.contains(".f64"))
+            return 5;
+        return 2;
+    }
+
+    if(Name.starts_with("llvm.lrint") || Name.starts_with("llvm.llrint"))
+    {
+        if (Name.contains(".f32"))
+            return 3;
+        if (Name.contains(".f64"))
+            return 5;
+        return 2;
+    }
+
+    if(Name.starts_with("llvm.experimental.constrained."))
+    {
+        if (Name.contains(".fadd") || Name.contains(".fsub"))
+            return 5;
+
+        if (Name.contains(".fmul"))
+            return 7;
+
+        if (Name.contains(".fdiv") || Name.contains(".frem"))
+            return 17;
+
+        if (Name.contains(".fma") || Name.contains(".fmuladd"))
+            return 8;
+
+        if (Name.contains(".fcmp") || Name.contains(".fcmps"))
+            return 3;
+
+        if (Name.contains(".sqrt"))
+            return 15;
+
+        if (Name.contains(".pow"))
+            return 40;
+
+        if (Name.contains(".powi"))
+            return 25;
+
+        if (Name.contains(".sin") || Name.contains(".cos"))
+            return 35;
+
+        if (Name.contains(".tan"))
+            return 45;
+
+        if (Name.contains(".asin") || Name.contains(".acos"))
+            return 50;
+
+        if (Name.contains(".atan"))
+            return 50;
+
+        if (Name.contains(".atan2"))
+            return 65;
+
+        if (Name.contains(".sinh") || Name.contains(".cosh") || Name.contains(".tanh"))
+            return 40;
+
+        if (Name.contains(".exp") && !Name.contains(".exp2"))
+            return 35;
+
+        if (Name.contains(".exp2"))
+            return 25;
+
+        if (Name.contains(".log2"))
+            return 23;
+
+        if (Name.contains(".log10"))
+            return 25;
+
+        if (Name.contains(".log") && !Name.contains(".log10") && !Name.contains(".log2"))
+            return 24;
+
+        if (Name.contains(".rint") || Name.contains(".nearbyint"))
+        {
+            if (Name.contains(".f32"))
+                return 3;
+            if (Name.contains(".f64"))
+                return 5;
+            return 2;
+        }
+
+        if (Name.contains(".lrint") || Name.contains(".llrint"))
+        {
+            if (Name.contains(".f32"))
+                return 3;
+            if (Name.contains(".f64"))
+                return 5;
+            return 2;
+        }
+
+        if (Name.contains(".maxnum") || Name.contains(".minnum") ||
+            Name.contains(".maximum") || Name.contains(".minimum"))
+        {
+            if (Name.contains(".v2"))
+                return 6;
+            if (Name.contains(".v4"))
+                return 8;
+            if (Name.contains(".v8"))
+                return 10;
+            if (Name.contains(".f32"))
+                return 3;
+            if (Name.contains(".f64"))
+                return 5;
+            return 2;
+        }
+
+        if (Name.contains(".ceil") || Name.contains(".floor"))
+            return 5;
+
+        if (Name.contains(".round") || Name.contains(".roundeven"))
+            return 6;
+
+        if (Name.contains(".lround") || Name.contains(".llround"))
+        {
+            if (Name.contains(".f32"))
+                return 3;
+            if (Name.contains(".f64"))
+                return 5;
+            return 2;
+        }
+    }
 
     return 0;
 }
