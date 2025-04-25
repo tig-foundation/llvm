@@ -1067,7 +1067,18 @@ PreservedAnalyses FuelPass::run(Module &M, ModuleAnalysisManager &AM)
             "__fuel_remaining");
         FuelGlobal->setAlignment(Align(8));
         FuelGlobal->setDSOLocal(true);
-        
+
+        // Add thread-local variable for fuel tracking
+        GlobalVariable *ThreadLocalFuelGlobal = new GlobalVariable(M,
+            Type::getInt64Ty(Context),
+            false,
+            GlobalValue::ExternalLinkage,
+            ConstantInt::get(Type::getInt64Ty(Context), 0),
+            "__thread_local_fuel_used");
+        ThreadLocalFuelGlobal->setAlignment(Align(8));
+        ThreadLocalFuelGlobal->setDSOLocal(true);
+        ThreadLocalFuelGlobal->setThreadLocal(true); 
+
         GlobalVariable *CurrMemoryUsageGlobal = new GlobalVariable(M,
             Type::getInt64Ty(Context),
             false,
@@ -1095,6 +1106,7 @@ PreservedAnalyses FuelPass::run(Module &M, ModuleAnalysisManager &AM)
         MaxMemoryUsageGlobal->setAlignment(Align(8));
         MaxMemoryUsageGlobal->setDSOLocal(true);
 
+        // Modify __check_fuel to update thread-local storage instead of using atomics
         FunctionType *CheckFuelType = FunctionType::get(
             Type::getVoidTy(Context),
             {Type::getInt64Ty(Context)},
@@ -1109,10 +1121,8 @@ PreservedAnalyses FuelPass::run(Module &M, ModuleAnalysisManager &AM)
         );
 
         BasicBlock *EntryBB = BasicBlock::Create(Context, "entry", CheckFuelFunc);
-        BasicBlock *OutOfFuelBB = BasicBlock::Create(Context, "out_of_fuel", CheckFuelFunc);
-        BasicBlock *ContinueBB = BasicBlock::Create(Context, "continue", CheckFuelFunc);
-
         Builder.SetInsertPoint(EntryBB);
+
         Value *FuelArg = CheckFuelFunc->getArg(0);
         Value *CurrentFuel = Builder.CreateAtomicRMW(
             AtomicRMWInst::Sub,
@@ -1122,13 +1132,17 @@ PreservedAnalyses FuelPass::run(Module &M, ModuleAnalysisManager &AM)
             AtomicOrdering::Monotonic
         );
 
+        BasicBlock *ExitBB = BasicBlock::Create(Context, "exit", CheckFuelFunc);
+        BasicBlock *ContinueBB = BasicBlock::Create(Context, "continue", CheckFuelFunc);
+
         Value *ShouldAbort = Builder.CreateICmpSLT(
             Builder.CreateSub(CurrentFuel, FuelArg),
             ConstantInt::get(Type::getInt64Ty(Context), 0)
         );
-        Builder.CreateCondBr(ShouldAbort, OutOfFuelBB, ContinueBB);
 
-        Builder.SetInsertPoint(OutOfFuelBB);
+        Builder.CreateCondBr(ShouldAbort, ExitBB, ContinueBB);
+
+        Builder.SetInsertPoint(ExitBB);
         GlobalVariable *RuntimeSigGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__runtime_signature", Type::getInt64Ty(Context)));
         RuntimeSigGlobal->setLinkage(GlobalValue::ExternalLinkage);
         Value *RuntimeSig = Builder.CreateLoad(Type::getInt64Ty(Context), RuntimeSigGlobal);
@@ -1155,7 +1169,8 @@ PreservedAnalyses FuelPass::run(Module &M, ModuleAnalysisManager &AM)
         Builder.SetInsertPoint(ContinueBB);
         Builder.CreateRetVoid();
     }
-   
+
+    // Get functions from module or insert them if they don't exist
     FunctionCallee CheckFuelFunc = M.getOrInsertFunction(
         "__check_fuel",
         FunctionType::get(
@@ -1176,8 +1191,34 @@ PreservedAnalyses FuelPass::run(Module &M, ModuleAnalysisManager &AM)
 
     for (auto &F : M)
     {
-        if (F.isDeclaration() || F.isIntrinsic() || F.getName().starts_with("llvm."))
+        if (F.isDeclaration() || F.isIntrinsic() || F.getName().starts_with("llvm.") ||
+            F.getName() == "__check_fuel")
             continue;
+
+        for (auto &BB : F) {
+            if (auto *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
+                Builder.SetInsertPoint(RI);
+                Value *ThreadFuelUsed = Builder.CreateLoad(Type::getInt64Ty(Context), ThreadLocalFuelGlobal);
+
+                Value *HasFuelUsed = Builder.CreateICmpSGT(
+                    ThreadFuelUsed,
+                    ConstantInt::get(Type::getInt64Ty(Context), 0)
+                );
+                
+                BasicBlock *CallCheckBB = BasicBlock::Create(Context, "call_check", &F);
+                BasicBlock *ContinueBB = BasicBlock::Create(Context, "continue", &F);
+                
+                Builder.CreateCondBr(HasFuelUsed, CallCheckBB, ContinueBB);
+                
+                Builder.SetInsertPoint(CallCheckBB);
+                Builder.CreateCall(CheckFuelFunc, ThreadFuelUsed);
+                
+                Builder.CreateStore(ConstantInt::get(Type::getInt64Ty(Context), 0), ThreadLocalFuelGlobal);
+                Builder.CreateBr(ContinueBB);
+                
+                Builder.SetInsertPoint(ContinueBB);
+            }
+        }
 
         for (auto &BB : F)
         {
@@ -1201,12 +1242,13 @@ PreservedAnalyses FuelPass::run(Module &M, ModuleAnalysisManager &AM)
                 {
                     if (Function *Callee = Call->getCalledFunction())
                     {
-                        if (Callee->getName() == "__check_fuel")
+                        if (Callee->getName() == "__check_fuel" || Callee->getName() == "__commit_fuel")
                         {
                             hasRuntimeSignature = true;
                             continue;
                         }
 
+                        // Memory allocation functions - keeping as is per instructions
                         if (Callee->getName() == "__rust_alloc")
                         {
                             Builder.SetInsertPoint(Call);
@@ -1262,7 +1304,7 @@ PreservedAnalyses FuelPass::run(Module &M, ModuleAnalysisManager &AM)
                             Builder.SetInsertPoint(Call);
                             Value *OldSize = Call->getArgOperand(1);
                             Value *NewSize = Call->getArgOperand(3);
-                            
+
                             Value *SizeDiff = Builder.CreateSub(NewSize, OldSize);
 
                             Instruction *NewCurrMemoryUsage = Builder.CreateAtomicRMW(
@@ -1322,7 +1364,7 @@ PreservedAnalyses FuelPass::run(Module &M, ModuleAnalysisManager &AM)
                                 AtomicOrdering::Monotonic
                             );
                             NewTotalMemoryUsage->setMetadata("op_sig", MDNode::get(Context, {}));
-                            
+
                             Instruction *NewMaxMemoryUsage = Builder.CreateAtomicRMW(
                                 AtomicRMWInst::Max,
                                 MaxMemoryUsageGlobal,
@@ -1337,7 +1379,7 @@ PreservedAnalyses FuelPass::run(Module &M, ModuleAnalysisManager &AM)
                 }
 
                 if (!hasRuntimeSignature)
-                    hasRuntimeSignature = F.getName() == "__check_fuel";
+                    hasRuntimeSignature = F.getName() == "__check_fuel" || F.getName() == "__commit_fuel";
 
                 if (!hasRuntimeSignature && I.getMetadata("op_sig"))
                     hasRuntimeSignature = true;
@@ -1352,9 +1394,12 @@ PreservedAnalyses FuelPass::run(Module &M, ModuleAnalysisManager &AM)
             if (BlockFuelCost > 0)
             {
                 Builder.SetInsertPoint(&*BB.getFirstInsertionPt());
-                Builder.CreateCall(CheckFuelFunc, {
-                    ConstantInt::get(Type::getInt64Ty(Context), BlockFuelCost)
-                });
+                Value *CurrentThreadFuel = Builder.CreateLoad(Type::getInt64Ty(Context), ThreadLocalFuelGlobal);
+
+                Value *NewThreadFuel = Builder.CreateAdd(CurrentThreadFuel, 
+                    ConstantInt::get(Type::getInt64Ty(Context), BlockFuelCost));
+
+                Builder.CreateStore(NewThreadFuel, ThreadLocalFuelGlobal);
             }
         }
     }
