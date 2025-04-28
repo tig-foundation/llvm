@@ -1,11 +1,11 @@
-#ifndef LLVM_TRANSFORMS_RUNTIMESIG_FUEL_H
-#define LLVM_TRANSFORMS_RUNTIMESIG_FUEL_H
+#ifndef LLVM_TRANSFORMS_RUNTIMESIG_FUELRTSIG_H
+#define LLVM_TRANSFORMS_RUNTIMESIG_FUELRTSIG_H
 
 #include "llvm/IR/PassManager.h"
 
 namespace llvm {
 
-class FuelPass : public PassInfoMixin<FuelPass> 
+class FuelRTSigPass : public PassInfoMixin<FuelRTSigPass> 
 {
 public:
     PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
@@ -16,4 +16,4 @@ public:
 
 } // namespace llvm
 
-#endif // LLVM_TRANSFORMS_RUNTIMESIG_FUEL_H
+#endif // LLVM_TRANSFORMS_RUNTIMESIG_FUELRTSIG_H

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 using namespace llvm;
 
@@ -728,6 +729,7 @@ public:
         const char* isFirstSrcStr = std::getenv("IS_FIRST_SRC");
         int isFirstSrc = isFirstSrcStr ? std::atoi(isFirstSrcStr) : 0;
 
+        // Global runtime signature
         GlobalVariable *RuntimeSigGlobal;
         if (isFirstSrc)
         {
@@ -737,18 +739,94 @@ public:
                 GlobalValue::ExternalLinkage,
                 ConstantInt::get(Type::getInt64Ty(Context), 0x4C4C4D564F4C4C4C),
                 "__runtime_signature");
+                
+            // Add thread-local variable for runtime signature tracking
+            GlobalVariable *ThreadLocalRuntimeSigGlobal = new GlobalVariable(M,
+                Type::getInt64Ty(Context),
+                false,
+                GlobalValue::ExternalLinkage,
+                ConstantInt::get(Type::getInt64Ty(Context), 0),
+                "__thread_local_runtime_signature");
+            ThreadLocalRuntimeSigGlobal->setAlignment(Align(8));
+            ThreadLocalRuntimeSigGlobal->setDSOLocal(true);
+            ThreadLocalRuntimeSigGlobal->setThreadLocal(true);
+            
+            // Create commit function
+            FunctionType *CommitSigType = FunctionType::get(
+                Type::getVoidTy(Context),
+                {},
+                false
+            );
+            Function *CommitSigFunc = Function::Create(
+                CommitSigType,
+                GlobalValue::ExternalLinkage,
+                "__commit_runtime_signature",
+                M
+            );
+            
+            BasicBlock *EntryBB = BasicBlock::Create(Context, "entry", CommitSigFunc);
+            Builder.SetInsertPoint(EntryBB);
+            
+            // Load the thread-local sig
+            Value *ThreadSig = Builder.CreateLoad(Type::getInt64Ty(Context), ThreadLocalRuntimeSigGlobal);
+            
+            // Check if it's non-zero
+            Value *HasSig = Builder.CreateICmpNE(
+                ThreadSig,
+                ConstantInt::get(Type::getInt64Ty(Context), 0)
+            );
+            
+            // Create the if structure
+            BasicBlock *ThenBB = BasicBlock::Create(Context, "then", CommitSigFunc);
+            BasicBlock *EndBB = BasicBlock::Create(Context, "end", CommitSigFunc);
+            
+            Builder.CreateCondBr(HasSig, ThenBB, EndBB);
+            
+            // Update in the then block
+            Builder.SetInsertPoint(ThenBB);
+            Builder.CreateAtomicRMW(
+                AtomicRMWInst::Xor,
+                RuntimeSigGlobal,
+                ThreadSig,
+                MaybeAlign(8),
+                AtomicOrdering::Monotonic
+            );
+            
+            // Reset thread-local value
+            Builder.CreateStore(
+                ConstantInt::get(Type::getInt64Ty(Context), 0),
+                ThreadLocalRuntimeSigGlobal
+            );
+            Builder.CreateBr(EndBB);
+            
+            // End block
+            Builder.SetInsertPoint(EndBB);
+            Builder.CreateRetVoid();
         }
         else
         {
             RuntimeSigGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__runtime_signature", Type::getInt64Ty(Context)));
             RuntimeSigGlobal->setLinkage(GlobalValue::ExternalLinkage);
         }
+        
+        // Get thread-local sig and commit function
+        GlobalVariable *ThreadLocalRuntimeSigGlobal = cast<GlobalVariable>(M.getOrInsertGlobal(
+            "__thread_local_runtime_signature", 
+            Type::getInt64Ty(Context))
+        );
+        ThreadLocalRuntimeSigGlobal->setLinkage(GlobalValue::ExternalLinkage);
+        ThreadLocalRuntimeSigGlobal->setThreadLocal(true);
+        
+        FunctionCallee CommitSigFunc = M.getOrInsertFunction(
+            "__commit_runtime_signature",
+            FunctionType::get(Type::getVoidTy(Context), {}, false)
+        );
 
         MDNode *OpSigMD = MDNode::get(Context, {});
 
         for (auto &F : M)
         {
-            if (F.empty() || F.isIntrinsic())
+            if (F.empty() || F.isIntrinsic() || F.getName() == "__commit_runtime_signature")
                 continue;
 
             DominatorTree DT(F);
@@ -778,19 +856,6 @@ public:
                         hasUnsafeInstr = true;
                         break;
                     }
-
-                    /*if (auto* FP = dyn_cast<FPMathOperator>(&I))
-                        if (FP->getFastMathFlags().any())
-                        {
-                            hasUnsafeInstr = true;
-                            break;
-                        }
-
-                    if (I.mayReadOrWriteMemory() && !isa<LoadInst>(&I) && !isa<StoreInst>(&I))
-                    {
-                        hasUnsafeInstr = true;
-                        break;
-                    }*/
                 }
 
                 if (!hasUnsafeInstr)
@@ -821,28 +886,6 @@ public:
                         InstrSig = rotateLeft(rotateRight(getCmpPrime(CI), rightRot), leftRot);
                     else if (auto* Cast = dyn_cast<CastInst>(&I))
                         InstrSig = rotateLeft(rotateRight(getCastPrime(Cast), rightRot), leftRot);
-                    /*else if (auto* Load = dyn_cast<LoadInst>(&I)) {
-                        Type* LoadTy = Load->getType();
-                        if (LoadTy->isIntegerTy(32))
-                            InstrSig = rotateLeft(rotateRight(InstructionPrimes::Load_i32, rightRot), leftRot);
-                        else if (LoadTy->isIntegerTy(64))
-                            InstrSig = rotateLeft(rotateRight(InstructionPrimes::Load_i64, rightRot), leftRot);
-                        else if (LoadTy->isFloatTy())
-                            InstrSig = rotateLeft(rotateRight(InstructionPrimes::Load_f32, rightRot), leftRot);
-                        else if (LoadTy->isDoubleTy())
-                            InstrSig = rotateLeft(rotateRight(InstructionPrimes::Load_f64, rightRot), leftRot);
-                    }
-                    else if (auto* Store = dyn_cast<StoreInst>(&I)) {
-                        Type* StoreTy = Store->getValueOperand()->getType();
-                        if (StoreTy->isIntegerTy(32))
-                            InstrSig = rotateLeft(rotateRight(InstructionPrimes::Store_i32, rightRot), leftRot);
-                        else if (StoreTy->isIntegerTy(64))
-                            InstrSig = rotateLeft(rotateRight(InstructionPrimes::Store_i64, rightRot), leftRot);
-                        else if (StoreTy->isFloatTy())
-                            InstrSig = rotateLeft(rotateRight(InstructionPrimes::Store_f32, rightRot), leftRot);
-                        else if (StoreTy->isDoubleTy())
-                            InstrSig = rotateLeft(rotateRight(InstructionPrimes::Store_f64, rightRot), leftRot);
-                    }*/
                     else if (auto* GEP = dyn_cast<GetElementPtrInst>(&I)) {
                         InstrSig = rotateLeft(rotateRight(InstructionPrimes::Load_i64, rightRot), leftRot);
                     }
@@ -875,21 +918,25 @@ public:
                 if (BlockSig != 0)
                 {
                     Builder.SetInsertPoint(&*BB->getFirstInsertionPt());
-                    Value* NewSig = Builder.CreateAtomicRMW(
-                        AtomicRMWInst::Xor,
-                        RuntimeSigGlobal,
-                        ConstantInt::get(Type::getInt64Ty(Context), BlockSig),
-                        MaybeAlign(8),
-                        AtomicOrdering::Monotonic
-                    );
-
-                    if (auto* NewSigInst = dyn_cast<Instruction>(NewSig))
-                        NewSigInst->setMetadata("op_sig", OpSigMD);
+                    
+                    // Update thread-local signature instead of global
+                    Value* CurrentThreadSig = Builder.CreateLoad(Type::getInt64Ty(Context), ThreadLocalRuntimeSigGlobal);
+                    Value* NewThreadSig = Builder.CreateXor(CurrentThreadSig, ConstantInt::get(Type::getInt64Ty(Context), BlockSig));
+                    Instruction* StoreInst = Builder.CreateStore(NewThreadSig, ThreadLocalRuntimeSigGlobal);
+                    StoreInst->setMetadata("op_sig", OpSigMD);
 
                     for (Instruction* I : InstrToMark)
                         I->setMetadata("mark_instr", OpSigMD);
                 }
             }
+            
+            // Add calls to the commit function at function exit points
+            //for (auto &BB : F) {
+            //    if (auto *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
+            //        Builder.SetInsertPoint(RI);
+            //        Builder.CreateCall(CommitSigFunc);
+            //    }
+            //}
         }
 
         return PreservedAnalyses::none();
