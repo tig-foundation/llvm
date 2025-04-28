@@ -726,7 +726,7 @@ static uint64_t getAtomicPrime(const Instruction* I)
     return 0;
 }
 
-PreservedAnalyses FuelPass::run(Function &F, FunctionAnalysisManager &AM)
+PreservedAnalyses FuelRTSigPass::run(Function &F, FunctionAnalysisManager &AM)
 {
     return PreservedAnalyses::all();
 }
@@ -2152,7 +2152,8 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                     }
                 }
 
-                if (instrumentMemory && auto *Call = dyn_cast<CallInst>(&I))
+                auto *Call = dyn_cast<CallInst>(&I);
+                if (instrumentMemory && Call)
                 {
                     if (Function *Callee = Call->getCalledFunction())
                     {
