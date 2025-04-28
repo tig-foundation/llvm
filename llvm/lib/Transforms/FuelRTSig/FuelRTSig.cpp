@@ -1770,13 +1770,13 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
     const char* isFirstSrcStr = std::getenv("IS_FIRST_SRC");
     int isFirstSrc = isFirstSrcStr ? std::atoi(isFirstSrcStr) : 0;
 
-    const char *instrumentFuel = std::getenv("INSTRUMENT_FUEL");
+    const char *instrumentFuelStr = std::getenv("INSTRUMENT_FUEL");
     bool instrumentFuel = instrumentFuelStr ? std::atoi(instrumentFuelStr) : false;
     
-    const char *instrumentMemory = std::getenv("INSTRUMENT_MEMORY");
+    const char *instrumentMemoryStr = std::getenv("INSTRUMENT_MEMORY");
     bool instrumentMemory = instrumentMemoryStr ? std::atoi(instrumentMemoryStr) : false;
 
-    const char *instrumentRTSig = std::getenv("INSTRUMENT_RTSIG");
+    const char *instrumentRTSigStr = std::getenv("INSTRUMENT_RTSIG");
     bool instrumentRTSig = instrumentRTSigStr ? std::atoi(instrumentRTSigStr) : false;
 
     // Setup globals
