@@ -69,7 +69,9 @@ jobs:
 
       - name: Prepare build artifacts
         run: |
-          tar --zstd -cf llvm.tar.zst build/*
+          pushd build
+          tar --zstd -cf ../llvm.tar.zst *
+          popd
 
       - name: Generate checksum
         run: |
