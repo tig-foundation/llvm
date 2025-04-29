@@ -1606,7 +1606,10 @@ unsigned getIntrinsicCost(StringRef Name)
         }
     }
 
-    errs() << "Unhandled intrinsic: " << Name << "\n";
+    const char* outputUnhandledIntrinsics = std::getenv("OUTPUT_UNHANDLED_INTRINSICS");
+    int outputUnhandledIntrinsics = outputUnhandledIntrinsicsStr ? std::atoi(outputUnhandledIntrinsicsStr) : 0;
+    if (outputUnhandledIntrinsics)
+        errs() << "Unhandled intrinsic: " << Name << "\n";
 
     return 0;
 }
