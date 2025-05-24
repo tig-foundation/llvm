@@ -2296,7 +2296,13 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             F.getName() == "__check_fuel" || F.getName() == "__commit_tls")
             continue;
 
-        errs() << llFileBaseName << "::" << rustDemangle(F.getName().str()) << "\n";
+        //errs() << llFileBaseName << "::" << rustDemangle(F.getName().str()) << "\n";
+
+        if (strstr(rustDemangle(F.getName().str()).c_str(), "std::sys::pal::"))
+        {
+            errs() << "skipping " << llFileBaseName << "::" << F.getName() << "\n";
+            continue;
+        }
 
         if (instrumentRTSig)
         {
