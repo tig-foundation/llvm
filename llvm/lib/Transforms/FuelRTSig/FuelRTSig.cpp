@@ -2298,7 +2298,9 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
 
         //errs() << llFileBaseName << "::" << rustDemangle(F.getName().str()) << "\n";
 
-        if (strstr(rustDemangle(F.getName().str()).c_str(), "std::sys::pal::"))
+        if (strstr(rustDemangle(F.getName().str()).c_str(), "sys::pal::") ||
+            strstr(rustDemangle(F.getName().str()).c_str(), "::unix")
+        )
         {
             errs() << "skipping " << llFileBaseName << "::" << F.getName() << "\n";
             continue;
