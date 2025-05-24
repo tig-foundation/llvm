@@ -27,117 +27,118 @@
 
 using namespace llvm;
 
-// Rust symbol demangling functions
-static const size_t HASH_LEN = 16;
-static const std::string HASH_PREFIX = "::h";
-
-static bool unescape(const char* &input, size_t &inputLen, std::string &output, const std::string &sequence, char value)
-{
-    if (inputLen >= sequence.length() && std::string(input, sequence.length()) == sequence)
-    {
-        input += sequence.length();
-        inputLen -= sequence.length();
-        output.push_back(value);
-
-        return true;
-    }
-
-    return false;
+// Rust symbol demangling functions - corrected implementation
+static bool isHexDigit(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
-static std::string stripSymbolPrefixLegacy(const std::string &sym)
-{
-    if (sym.length() >= 4 && sym.substr(0, 4) == "__ZN")
-        return sym.substr(4);
-
-    if (sym.length() >= 3 && sym.substr(0, 3) == "_ZN")
-        return sym.substr(3);
-
-    if (sym.length() >= 2 && sym.substr(0, 2) == "ZN")
-        return sym.substr(2);
-
-    return "";
-}
-
-static std::string rustDemangleSymbolElementLegacy(const std::string &legacySymbolElement)
-{
-    const char* input = legacySymbolElement.c_str();
-    size_t inputLen = legacySymbolElement.length();
-    std::string output;
-    size_t idx = 0;
-    char lastChar = '\0';
-
-    while (inputLen > 0)
-    {
-        char c = input[0];
-        switch (c)
-        {
-            case '$':
-                if (!(unescape(input, inputLen, output, "$C$", ',') ||
-                      unescape(input, inputLen, output, "$SP$", '@') ||
-                      unescape(input, inputLen, output, "$BP$", '*') ||
-                      unescape(input, inputLen, output, "$RF$", '&') ||
-                      unescape(input, inputLen, output, "$LT$", '<') ||
-                      unescape(input, inputLen, output, "$GT$", '>') ||
-                      unescape(input, inputLen, output, "$LP$", '(') ||
-                      unescape(input, inputLen, output, "$RP$", ')') ||
-                      unescape(input, inputLen, output, "$u20$", ' ') ||
-                      unescape(input, inputLen, output, "$u22$", '"') ||
-                      unescape(input, inputLen, output, "$u27$", '\'') ||
-                      unescape(input, inputLen, output, "$u2b$", '+') ||
-                      unescape(input, inputLen, output, "$u3b$", ';') ||
-                      unescape(input, inputLen, output, "$u5b$", '[') ||
-                      unescape(input, inputLen, output, "$u5d$", ']') ||
-                      unescape(input, inputLen, output, "$u7b$", '{') ||
-                      unescape(input, inputLen, output, "$u7d$", '}') ||
-                      unescape(input, inputLen, output, "$u7e$", '~')))
-                {
-                    return legacySymbolElement;
+static std::string unescapeRustSymbol(const std::string &input) {
+    const char* rest = input.c_str();
+    size_t len = input.length();
+    std::string result;
+    
+    while (len > 0) {
+        if (rest[0] == '.') {
+            if (len >= 2 && rest[1] == '.') {
+                result += "::";
+                rest += 2;
+                len -= 2;
+            } else {
+                result += ".";
+                rest += 1;
+                len -= 1;
+            }
+        } else if (rest[0] == '$') {
+            const char *escape = (const char*)memchr(rest + 1, '$', len - 1);
+            if (escape == nullptr) {
+                result += rest[0];
+                rest += 1;
+                len -= 1;
+                continue;
+            }
+            
+            const char *escape_start = rest + 1;
+            size_t escape_len = escape - (rest + 1);
+            size_t next_len = len - (escape + 1 - rest);
+            const char *next_rest = escape + 1;
+            
+            char ch = '\0';
+            bool found = false;
+            
+            if (escape_len == 2 && escape_start[0] == 'S' && escape_start[1] == 'P') {
+                ch = '@'; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'B' && escape_start[1] == 'P') {
+                ch = '*'; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'R' && escape_start[1] == 'F') {
+                ch = '&'; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'L' && escape_start[1] == 'T') {
+                ch = '<'; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'G' && escape_start[1] == 'T') {
+                ch = '>'; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'L' && escape_start[1] == 'P') {
+                ch = '('; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'R' && escape_start[1] == 'P') {
+                ch = ')'; found = true;
+            } else if (escape_len == 1 && escape_start[0] == 'C') {
+                ch = ','; found = true;
+            } else if (escape_len > 1 && escape_start[0] == 'u') {
+                std::string hex_str(escape_start + 1, escape_len - 1);
+                char *end;
+                unsigned long val = strtoul(hex_str.c_str(), &end, 16);
+                if (*end == '\0' && val <= 127) {
+                    ch = (char)val;
+                    found = true;
                 }
+            }
+            
+            if (found) {
+                result += ch;
+                len = next_len;
+                rest = next_rest;
+            } else {
+                result += rest[0];
+                rest += 1;
+                len -= 1;
+            }
+        } else {
+            size_t j = 0;
+            for (; j < len && rest[j] != '$' && rest[j] != '.'; j++);
+            if (j == len) {
+                result.append(rest, len);
                 break;
-
-            case '.':
-                if (inputLen >= 2 && input[1] == '.')
-                {
-                    output += "::";
-                    input += 2;
-                    inputLen -= 2;
-                }
-                else
-                {
-                    output.push_back('-');
-                    input++;
-                    inputLen--;
-                }
-                break;
-
-            case '_':
-                if (!((idx == 0 || lastChar == ':') && inputLen >= 2 && input[1] == '$'))
-                {
-                    output.push_back(c);
-                }
-                input++;
-                inputLen--;
-                break;
-
-            default:
-                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
-                {
-                    output.push_back(c);
-                    input++;
-                    inputLen--;
-                }
-                else
-                {
-                    return legacySymbolElement;
-                }
-                break;
+            }
+            result.append(rest, j);
+            rest += j;
+            len -= j;
         }
-        idx++;
-        lastChar = c;
     }
+    
+    return result;
+}
 
-    return output;
+static std::string stripSymbolPrefix(const std::string &sym) {
+    if (sym.length() >= 4 && sym.substr(0, 4) == "__ZN") {
+        return sym.substr(4);
+    }
+    if (sym.length() >= 3 && sym.substr(0, 3) == "_ZN") {
+        return sym.substr(3);
+    }
+    if (sym.length() >= 2 && sym.substr(0, 2) == "ZN") {
+        return sym.substr(2);
+    }
+    
+    // Handle v0 mangling
+    if (sym.length() >= 2 && sym.substr(0, 2) == "_R") {
+        return sym.substr(2);
+    }
+    if (sym.length() >= 1 && sym.substr(0, 1) == "R") {
+        return sym.substr(1);
+    }
+    if (sym.length() >= 3 && sym.substr(0, 3) == "__R") {
+        return sym.substr(3);
+    }
+    
+    return "";
 }
 
 static std::vector<std::string> splitSymbolIntoElementsLegacy(const std::string &legacySymbol) {
@@ -176,12 +177,11 @@ static std::vector<std::string> splitSymbolIntoElementsLegacy(const std::string 
         return {};
     }
     
-    // Parse the length
+    // Parse the length - avoid try-catch since exceptions are disabled
     std::string len_str = legacySymbol.substr(hash_len_start, hash_len_end - hash_len_start);
-    int hash_element_len;
-    try {
-        hash_element_len = std::stoi(len_str);
-    } catch (...) {
+    char *end;
+    long hash_element_len = strtol(len_str.c_str(), &end, 10);
+    if (*end != '\0' || hash_element_len < 0) {
         return {};
     }
     
