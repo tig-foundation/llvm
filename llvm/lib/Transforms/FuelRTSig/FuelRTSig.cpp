@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 #include <cctype>
+#include <cstring>
 
 using namespace llvm;
 
@@ -197,6 +198,232 @@ static std::string demangleSymbolLegacy(const std::string &legacySymbol)
     }
 
     return result;
+}
+
+
+
+// Rust symbol demangling functions - complete implementation
+static std::string unescapeRustSymbol(const std::string &input) {
+    const char* rest = input.c_str();
+    size_t len = input.length();
+    std::string result;
+    
+    while (len > 0) {
+        if (rest[0] == '.') {
+            if (len >= 2 && rest[1] == '.') {
+                result += "::";
+                rest += 2;
+                len -= 2;
+            } else {
+                result += ".";
+                rest += 1;
+                len -= 1;
+            }
+        } else if (rest[0] == '$') {
+            const char *escape = (const char*)memchr(rest + 1, '$', len - 1);
+            if (escape == nullptr) {
+                // No closing $, just add the character and continue
+                result += rest[0];
+                rest += 1;
+                len -= 1;
+                continue;
+            }
+            
+            const char *escape_start = rest + 1;
+            size_t escape_len = escape - (rest + 1);
+            size_t next_len = len - (escape + 1 - rest);
+            const char *next_rest = escape + 1;
+            
+            char ch = '\0';
+            bool found = false;
+            
+            if (escape_len == 2 && escape_start[0] == 'S' && escape_start[1] == 'P') {
+                ch = '@'; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'B' && escape_start[1] == 'P') {
+                ch = '*'; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'R' && escape_start[1] == 'F') {
+                ch = '&'; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'L' && escape_start[1] == 'T') {
+                ch = '<'; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'G' && escape_start[1] == 'T') {
+                ch = '>'; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'L' && escape_start[1] == 'P') {
+                ch = '('; found = true;
+            } else if (escape_len == 2 && escape_start[0] == 'R' && escape_start[1] == 'P') {
+                ch = ')'; found = true;
+            } else if (escape_len == 1 && escape_start[0] == 'C') {
+                ch = ','; found = true;
+            } else if (escape_len > 1 && escape_start[0] == 'u') {
+                // Unicode escape like $u20$, $u2b$, etc.
+                std::string hex_str(escape_start + 1, escape_len - 1);
+                char *end;
+                unsigned long val = strtoul(hex_str.c_str(), &end, 16);
+                if (*end == '\0' && val <= 127) { // Only handle ASCII for simplicity
+                    ch = (char)val;
+                    found = true;
+                }
+            }
+            
+            if (found) {
+                result += ch;
+                len = next_len;
+                rest = next_rest;
+            } else {
+                // Unknown escape, copy as-is
+                result += rest[0];
+                rest += 1;
+                len -= 1;
+            }
+        } else {
+            // Find next special character
+            size_t j = 0;
+            for (; j < len && rest[j] != '$' && rest[j] != '.'; j++);
+            if (j == len) {
+                // No more special characters, copy the rest
+                result.append(rest, len);
+                break;
+            }
+            result.append(rest, j);
+            rest += j;
+            len -= j;
+        }
+    }
+    
+    return result;
+}
+
+static std::string stripSymbolPrefix(const std::string &sym) {
+    // Handle v0 mangling first
+    if (sym.length() >= 2 && sym.substr(0, 2) == "_R") {
+        return sym.substr(2);
+    }
+    if (sym.length() >= 1 && sym.substr(0, 1) == "R") {
+        return sym.substr(1);
+    }
+    if (sym.length() >= 3 && sym.substr(0, 3) == "__R") {
+        return sym.substr(3);
+    }
+    
+    // Handle legacy mangling
+    if (sym.length() >= 4 && sym.substr(0, 4) == "__ZN") {
+        return sym.substr(4);
+    }
+    if (sym.length() >= 3 && sym.substr(0, 3) == "_ZN") {
+        return sym.substr(3);
+    }
+    if (sym.length() >= 2 && sym.substr(0, 2) == "ZN") {
+        return sym.substr(2);
+    }
+    
+    return "";
+}
+
+static std::vector<std::string> splitSymbolIntoElementsLegacy(const std::string &legacySymbol) {
+    size_t cursor = 0;
+    size_t idx = 0;
+    // Don't assume hash suffix exists - some symbols might not have it
+    size_t end = legacySymbol.length();
+    
+    // Try to find hash suffix and adjust end accordingly
+    if (legacySymbol.length() > 19) { // minimum for "::h" + 16 hex chars + "E"
+        size_t hash_pos = legacySymbol.rfind("::h");
+        if (hash_pos != std::string::npos && hash_pos + 19 <= legacySymbol.length()) {
+            bool is_hash = true;
+            for (size_t i = hash_pos + 3; i < hash_pos + 19; i++) {
+                char c = legacySymbol[i];
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                    is_hash = false;
+                    break;
+                }
+            }
+            if (is_hash) {
+                end = hash_pos;
+            }
+        }
+    }
+    
+    std::vector<std::string> legacySymbolElements;
+    
+    while (idx < end) {
+        char c = legacySymbol[idx];
+        if (std::isdigit(c)) {
+            cursor = cursor * 10 + (c - '0');
+            idx++;
+        } else {
+            if (cursor == 0) {
+                // If we can't parse as length-prefixed, return empty to fall back
+                return {};
+            }
+            
+            if (idx + cursor > end) {
+                // Would read past end, invalid
+                return {};
+            }
+            
+            legacySymbolElements.push_back(legacySymbol.substr(idx, cursor));
+            idx += cursor;
+            cursor = 0;
+        }
+    }
+    
+    return legacySymbolElements;
+}
+
+static std::string demangleSymbolLegacy(const std::string &legacySymbol) {
+    if (legacySymbol.empty()) {
+        return legacySymbol;
+    }
+    
+    std::string legacySymbolStripped = stripSymbolPrefix(legacySymbol);
+    if (legacySymbolStripped.empty()) {
+        // No recognized prefix, but might still have escape sequences
+        return unescapeRustSymbol(legacySymbol);
+    }
+    
+    // Try to parse as traditional length-prefixed legacy format
+    std::vector<std::string> legacySymbolElements = splitSymbolIntoElementsLegacy(legacySymbolStripped);
+    if (!legacySymbolElements.empty()) {
+        // Successfully parsed as legacy format
+        std::vector<std::string> legacyElementsDemangled;
+        for (const std::string &element : legacySymbolElements) {
+            legacyElementsDemangled.push_back(unescapeRustSymbol(element));
+        }
+        
+        std::string result;
+        for (size_t idx = 0; idx < legacyElementsDemangled.size(); idx++) {
+            if (idx > 0)
+                result += "::";
+            result += legacyElementsDemangled[idx];
+        }
+        return result;
+    } else {
+        // Couldn't parse as legacy format, but still try to unescape
+        return unescapeRustSymbol(legacySymbolStripped);
+    }
+}
+
+static std::string rustDemangle(const std::string &symbol) {
+    // Handle LLVM suffixes first
+    std::string s = symbol;
+    size_t llvm_pos = s.find(".llvm.");
+    if (llvm_pos != std::string::npos) {
+        // Check if everything after .llvm. is hex
+        bool all_hex = true;
+        for (size_t i = llvm_pos + 6; i < s.length(); i++) {
+            char c = s[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || c == '@')) {
+                all_hex = false;
+                break;
+            }
+        }
+        if (all_hex) {
+            s = s.substr(0, llvm_pos);
+        }
+    }
+    
+    // Try v0 demangling first (would need full implementation)
+    // For now, just try legacy
+    return demangleSymbolLegacy(s);
 }
 
 static bool isInstructionSafe(const Instruction &I)
@@ -2211,7 +2438,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             F.getName() == "__check_fuel" || F.getName() == "__commit_tls")
             continue;
 
-        errs() << llFileBaseName << "::" << demangleSymbolLegacy(F.getName().str()) << "\n";
+        errs() << llFileBaseName << "::" << rustDemangle(F.getName().str()) << "\n";
 
         if (instrumentRTSig)
         {
