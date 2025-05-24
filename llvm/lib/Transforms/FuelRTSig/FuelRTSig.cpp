@@ -2298,11 +2298,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
 
         //errs() << llFileBaseName << "::" << rustDemangle(F.getName().str()) << "\n";
 
-        if (strstr(rustDemangle(F.getName().str()).c_str(), "sys::pal::") ||
-            strstr(rustDemangle(F.getName().str()).c_str(), "::unix") ||
-            strstr(rustDemangle(F.getName().str()).c_str(), "thread::") ||
-            strstr(rustDemangle(F.getName().str()).c_str(), "threading::") ||
-            strstr(rustDemangle(F.getName().str()).c_str(), "core::") ||
+        if (
             strstr(rustDemangle(F.getName().str()).c_str(), "sync::")
         )
         {
