@@ -2303,7 +2303,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             strstr(rustDemangle(F.getName().str()).c_str(), "thread::") ||
             strstr(rustDemangle(F.getName().str()).c_str(), "threading::") ||
             strstr(rustDemangle(F.getName().str()).c_str(), "core::") ||
-            strstr(rustDemangle(F.getName().str()).c_str(), "sync::") ||
+            strstr(rustDemangle(F.getName().str()).c_str(), "sync::")
         )
         {
             errs() << "skipping " << llFileBaseName << "::" << F.getName() << "\n";
