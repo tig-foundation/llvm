@@ -2032,6 +2032,8 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             F.getName() == "__check_fuel" || F.getName() == "__commit_tls")
             continue;
 
+        errs() << F.getName() << "\n";
+
         if (instrumentRTSig)
         {
             // Runtime signature instrumentation (simplified for brevity)
