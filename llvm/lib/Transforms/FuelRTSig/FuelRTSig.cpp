@@ -1,4 +1,5 @@
 #include "llvm/Pass.h"
+#include "llvm/Pass.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/IR/Module.h"
@@ -19,8 +20,184 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include <string>
+#include <vector>
+#include <cctype>
 
 using namespace llvm;
+
+// Rust symbol demangling functions
+static const size_t HASH_LEN = 16;
+static const std::string HASH_PREFIX = "::h";
+
+static bool unescape(const char* &input, size_t &inputLen, std::string &output, const std::string &sequence, char value)
+{
+    if (inputLen >= sequence.length() && std::string(input, sequence.length()) == sequence)
+    {
+        input += sequence.length();
+        inputLen -= sequence.length();
+        output.push_back(value);
+
+        return true;
+    }
+
+    return false;
+}
+
+static std::string stripSymbolPrefixLegacy(const std::string &sym)
+{
+    if (sym.length() >= 4 && sym.substr(0, 4) == "__ZN")
+        return sym.substr(4);
+
+    if (sym.length() >= 3 && sym.substr(0, 3) == "_ZN")
+        return sym.substr(3);
+
+    if (sym.length() >= 2 && sym.substr(0, 2) == "ZN")
+        return sym.substr(2);
+
+    return "";
+}
+
+static std::string rustDemangleSymbolElementLegacy(const std::string &legacySymbolElement)
+{
+    const char* input = legacySymbolElement.c_str();
+    size_t inputLen = legacySymbolElement.length();
+    std::string output;
+    size_t idx = 0;
+    char lastChar = '\0';
+
+    while (inputLen > 0)
+    {
+        char c = input[0];
+        switch (c)
+        {
+            case '$':
+                if (!(unescape(input, inputLen, output, "$C$", ',') ||
+                      unescape(input, inputLen, output, "$SP$", '@') ||
+                      unescape(input, inputLen, output, "$BP$", '*') ||
+                      unescape(input, inputLen, output, "$RF$", '&') ||
+                      unescape(input, inputLen, output, "$LT$", '<') ||
+                      unescape(input, inputLen, output, "$GT$", '>') ||
+                      unescape(input, inputLen, output, "$LP$", '(') ||
+                      unescape(input, inputLen, output, "$RP$", ')') ||
+                      unescape(input, inputLen, output, "$u20$", ' ') ||
+                      unescape(input, inputLen, output, "$u22$", '"') ||
+                      unescape(input, inputLen, output, "$u27$", '\'') ||
+                      unescape(input, inputLen, output, "$u2b$", '+') ||
+                      unescape(input, inputLen, output, "$u3b$", ';') ||
+                      unescape(input, inputLen, output, "$u5b$", '[') ||
+                      unescape(input, inputLen, output, "$u5d$", ']') ||
+                      unescape(input, inputLen, output, "$u7b$", '{') ||
+                      unescape(input, inputLen, output, "$u7d$", '}') ||
+                      unescape(input, inputLen, output, "$u7e$", '~')))
+                {
+                    return legacySymbolElement;
+                }
+                break;
+
+            case '.':
+                if (inputLen >= 2 && input[1] == '.')
+                {
+                    output += "::";
+                    input += 2;
+                    inputLen -= 2;
+                }
+                else
+                {
+                    output.push_back('-');
+                    input++;
+                    inputLen--;
+                }
+                break;
+
+            case '_':
+                if (!((idx == 0 || lastChar == ':') && inputLen >= 2 && input[1] == '$'))
+                {
+                    output.push_back(c);
+                }
+                input++;
+                inputLen--;
+                break;
+
+            default:
+                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+                {
+                    output.push_back(c);
+                    input++;
+                    inputLen--;
+                }
+                else
+                {
+                    return legacySymbolElement;
+                }
+                break;
+        }
+        idx++;
+        lastChar = c;
+    }
+
+    return output;
+}
+
+static std::vector<std::string> splitSymbolIntoElementsLegacy(const std::string &legacySymbol)
+{
+    size_t cursor = 0;
+    size_t idx = 0;
+    size_t end = legacySymbol.length() - (HASH_PREFIX.length() + HASH_LEN) - 1;
+    std::vector<std::string> legacySymbolElements;
+
+    while (idx < end)
+    {
+        char c = legacySymbol[idx];
+        if (std::isdigit(c))
+        {
+            cursor = cursor * 10 + (c - '0');
+            idx++;
+        }
+        else
+        {
+            if (cursor == 0)
+                return {};
+
+            legacySymbolElements.push_back(legacySymbol.substr(idx, cursor));
+            idx += cursor;
+            cursor = 0;
+        }
+    }
+
+    return legacySymbolElements;
+}
+
+static std::string demangleSymbolLegacy(const std::string &legacySymbol)
+{
+    if (legacySymbol.length() <= 1 || legacySymbol.back() != 'E')
+        return legacySymbol;
+
+    std::string legacySymbolStripped = stripSymbolPrefixLegacy(legacySymbol);
+    if (legacySymbolStripped.empty())
+        return legacySymbol;
+
+    std::vector<std::string> legacySymbolElements = splitSymbolIntoElementsLegacy(legacySymbolStripped);
+    if (legacySymbolElements.empty())
+        return legacySymbol;
+
+    std::vector<std::string> legacyElementsDemangled;
+    for (const std::string &element : legacySymbolElements)
+    {
+        legacyElementsDemangled.push_back(rustDemangleSymbolElementLegacy(element));
+    }
+
+    std::string result;
+    for (size_t idx = 0; idx < legacyElementsDemangled.size(); idx++)
+    {
+        if (idx > 0)
+            result += "::";
+
+        result += legacyElementsDemangled[idx];
+    }
+
+    return result;
+}
 
 static bool isInstructionSafe(const Instruction &I)
 {
@@ -2034,7 +2211,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             F.getName() == "__check_fuel" || F.getName() == "__commit_tls")
             continue;
 
-        errs() << llFileBaseName << "::" << F.getName() << "\n";
+        errs() << llFileBaseName << "::" << demangleSymbolLegacy(F.getName()) << "\n";
 
         if (instrumentRTSig)
         {
