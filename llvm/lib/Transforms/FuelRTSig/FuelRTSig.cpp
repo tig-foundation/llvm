@@ -2211,7 +2211,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             F.getName() == "__check_fuel" || F.getName() == "__commit_tls")
             continue;
 
-        errs() << llFileBaseName << "::" << demangleSymbolLegacy(F.getName()) << "\n";
+        errs() << llFileBaseName << "::" << demangleSymbolLegacy(F.getName().str()) << "\n";
 
         if (instrumentRTSig)
         {
