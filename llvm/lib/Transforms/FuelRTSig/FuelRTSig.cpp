@@ -1782,6 +1782,8 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
     const char *instrumentRTSigStr = std::getenv("INSTRUMENT_RTSIG");
     bool instrumentRTSig = instrumentRTSigStr ? std::atoi(instrumentRTSigStr) : false;
 
+    const char *llFileBaseName = std::getenv("LL_FILE_BASENAME");
+
     // Setup globals
     GlobalVariable *FuelGlobal;
     GlobalVariable *RuntimeSigGlobal;
@@ -2032,7 +2034,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             F.getName() == "__check_fuel" || F.getName() == "__commit_tls")
             continue;
 
-        errs() << F.getName() << "\n";
+        errs() << llFileBaseName << "::" << F.getName() << "\n";
 
         if (instrumentRTSig)
         {
