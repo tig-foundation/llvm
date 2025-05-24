@@ -140,7 +140,7 @@ static std::string rustDemangleSymbolElementLegacy(const std::string &legacySymb
     return output;
 }
 
-static std::vector<std::string> splitSymbolIntoElementsLegacy(const std::string &legacySymbol)
+/*static std::vector<std::string> splitSymbolIntoElementsLegacy(const std::string &legacySymbol)
 {
     size_t cursor = 0;
     size_t idx = 0;
@@ -167,9 +167,9 @@ static std::vector<std::string> splitSymbolIntoElementsLegacy(const std::string 
     }
 
     return legacySymbolElements;
-}
+}*/
 
-static std::string demangleSymbolLegacy(const std::string &legacySymbol)
+/*static std::string demangleSymbolLegacy(const std::string &legacySymbol)
 {
     if (legacySymbol.length() <= 1 || legacySymbol.back() != 'E')
         return legacySymbol;
@@ -199,8 +199,7 @@ static std::string demangleSymbolLegacy(const std::string &legacySymbol)
 
     return result;
 }
-
-
+*/
 
 // Rust symbol demangling functions - complete implementation
 static std::string unescapeRustSymbol(const std::string &input) {
