@@ -2298,10 +2298,9 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
 
         //errs() << llFileBaseName << "::" << rustDemangle(F.getName().str()) << "\n";
 
-        if (
-            (strcmp(llFileBaseName, "std") == 0) &&
-            strstr(rustDemangle(F.getName().str()).c_str(), "sync::") ||
-            strstr(rustDemangle(F.getName().str()).c_str(), "::thread")
+        if (strcmp(llFileBaseName, "std") == 0 &&
+            (strstr(rustDemangle(F.getName().str()).c_str(), "sync::") ||
+            strstr(rustDemangle(F.getName().str()).c_str(), "::thread"))
         )
         {
             uint64_t FuncHash = hash_value(F.getName());
