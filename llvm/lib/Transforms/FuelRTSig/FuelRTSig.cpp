@@ -2300,7 +2300,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
 
         if (
             strstr(rustDemangle(F.getName().str()).c_str(), "sync::") ||
-            strstr(rustDemangle(F.getName().str()).c_str(), "::thread") ||
+            strstr(rustDemangle(F.getName().str()).c_str(), "::thread")
         )
         {
             uint64_t FuncHash = hash_value(F.getName());
