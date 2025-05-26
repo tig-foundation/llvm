@@ -2302,7 +2302,8 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             strstr(rustDemangle(F.getName().str()).c_str(), "sync::")
         )
         {
-            errs() << "skipping " << llFileBaseName << "::" << F.getName() << "\n";
+            uint64_t FuncHash = hash_value(F.getName());
+            errs() << "skipping " << llFileBaseName << " :: " << F.getName() << " (" << rustDemangle(F.getName().str()) << ") [hash: " << FuncHash << "]\n";
             continue;
         }
 
