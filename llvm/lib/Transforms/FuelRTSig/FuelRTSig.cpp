@@ -2308,7 +2308,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             continue;
         }
 
-        errs() << llFileBaseName << "\n";
+        //errs() << llFileBaseName << "\n";
         if (strcmp(llFileBaseName, "tig_algorithms") == 0)
         {
             uint64_t FuncHash = hash_value(F.getName());
