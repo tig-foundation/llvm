@@ -2308,9 +2308,8 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             continue;
         }
 
-        //errs() << llFileBaseName << "\n";
         if (strcmp(llFileBaseName, "tig_algorithms") == 0 &&
-            (strstr(rustDemangle(F.getName().str()).c_str(), "rayon") ||
+            (/*strstr(rustDemangle(F.getName().str()).c_str(), "rayon") ||*/
             strstr(rustDemangle(F.getName().str()).c_str(), "crossbeam"))
         )
         {
