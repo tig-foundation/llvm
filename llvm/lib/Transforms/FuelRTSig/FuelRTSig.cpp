@@ -2309,10 +2309,12 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         }
 
         //errs() << llFileBaseName << "\n";
-        if (strcmp(llFileBaseName, "tig_algorithms") == 0)
+        if (strcmp(llFileBaseName, "tig_algorithms") == 0 &&
+            (strstr(rustDemangle(F.getName().str()).c_str(), "rayon"))
+        )
         {
             uint64_t FuncHash = hash_value(F.getName());
-            errs() << llFileBaseName << " :: " << F.getName() << " (" << rustDemangle(F.getName().str()) << ") [hash: " << FuncHash << "]\n";
+            errs() << "skipping " << llFileBaseName << " :: " << F.getName() << " (" << rustDemangle(F.getName().str()) << ") [hash: " << FuncHash << "]\n";
             continue;
         }
 
