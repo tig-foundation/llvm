@@ -2310,7 +2310,8 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
 
         //errs() << llFileBaseName << "\n";
         if (strcmp(llFileBaseName, "tig_algorithms") == 0 &&
-            (strstr(rustDemangle(F.getName().str()).c_str(), "rayon"))
+            (strstr(rustDemangle(F.getName().str()).c_str(), "rayon") ||
+            strstr(rustDemangle(F.getName().str()).c_str(), "crossbeam"))
         )
         {
             uint64_t FuncHash = hash_value(F.getName());
