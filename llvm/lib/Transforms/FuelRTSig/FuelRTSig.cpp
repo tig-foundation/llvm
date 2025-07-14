@@ -2271,21 +2271,12 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         );
 
         BasicBlock *MemoryCheckEntryBB = BasicBlock::Create(Context, "entry", MemoryCheckFunc);
-        BasicBlock *DoCheckBB = BasicBlock::Create(Context, "do_check", MemoryCheckFunc);
         BasicBlock *ContinueBBMemoryCheck = BasicBlock::Create(Context, "continue", MemoryCheckFunc);
         BasicBlock *ExitBBMemoryCheck = BasicBlock::Create(Context, "exit", MemoryCheckFunc);
         
         Builder.SetInsertPoint(MemoryCheckEntryBB);
 
         Value *MaxAllowedMemoryUsage = Builder.CreateLoad(Type::getInt64Ty(Context), MaxAllowedMemoryUsageGlobal);
-        Value *ShouldDoCheck = Builder.CreateICmpUGT(
-            MaxAllowedMemoryUsage,
-            ConstantInt::get(Type::getInt64Ty(Context), 0)
-        );
-
-        Builder.CreateCondBr(ShouldDoCheck, DoCheckBB, ContinueBBMemoryCheck);
-
-        Builder.SetInsertPoint(DoCheckBB);
         Value *CurrMemoryUsage = Builder.CreateLoad(Type::getInt64Ty(Context), CurrMemoryUsageGlobal);
         Value *ShouldAbortMemoryCheck = Builder.CreateICmpUGT(
             CurrMemoryUsage,
