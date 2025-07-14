@@ -2124,6 +2124,15 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         MaxMemoryUsageGlobal->setAlignment(Align(8));
         MaxMemoryUsageGlobal->setDSOLocal(true);
 
+        GlobalVariable *MaxAllowedMemoryUsageGlobal = new GlobalVariable(M,
+            Type::getInt64Ty(Context),
+            false,
+            GlobalValue::ExternalLinkage,
+            ConstantInt::get(Type::getInt64Ty(Context), 0),
+            "__max_allowed_memory_usage");
+        MaxAllowedMemoryUsageGlobal->setAlignment(Align(8));
+        MaxAllowedMemoryUsageGlobal->setDSOLocal(true);
+
         // Create check fuel function
         FunctionType *CheckFuelType = FunctionType::get(
             Type::getVoidTy(Context),
@@ -2245,6 +2254,43 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         
         Builder.SetInsertPoint(EndBB);
         Builder.CreateRetVoid();
+
+        // memory check function    
+        FunctionType *MemoryCheckType = FunctionType::get(
+            Type::getVoidTy(Context),
+            {},
+            false
+        );
+
+        Function *MemoryCheckFunc = Function::Create(
+            MemoryCheckType,
+            GlobalValue::ExternalLinkage,
+            "__memory_check",
+            M
+        );
+
+        BasicBlock *MemoryCheckEntryBB = BasicBlock::Create(Context, "entry", MemoryCheckFunc);
+        Builder.SetInsertPoint(MemoryCheckEntryBB);
+
+        Value *MaxAllowedMemoryUsage = Builder.CreateLoad(Type::getInt64Ty(Context), MaxAllowedMemoryUsageGlobal);
+        Value *CurrMemoryUsage = Builder.CreateLoad(Type::getInt64Ty(Context), CurrMemoryUsageGlobal);
+        Value *ShouldAbortMemoryCheck = Builder.CreateICmpUGT(
+            CurrMemoryUsage,
+            MaxAllowedMemoryUsage
+        );
+
+        BasicBlock *ContinueBBMemoryCheck = BasicBlock::Create(Context, "continue", MemoryCheckFunc);
+        BasicBlock *ExitBBMemoryCheck = BasicBlock::Create(Context, "exit", MemoryCheckFunc);
+        Builder.CreateCondBr(ShouldAbortMemoryCheck, ExitBBMemoryCheck, ContinueBBMemoryCheck);
+
+        Builder.SetInsertPoint(ExitBBMemoryCheck);
+        
+        Builder.CreateCall(ExitFunc, {ConstantInt::get(Type::getInt32Ty(Context), 83)});
+        Builder.CreateUnreachable();
+        Builder.CreateRetVoid();
+
+        Builder.SetInsertPoint(ContinueBBMemoryCheck);
+        Builder.CreateRetVoid();
     }
     else
     {
@@ -2277,6 +2323,11 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             {Type::getInt64Ty(Context)},
             false
         )
+    );
+
+    FunctionCallee MemoryCheckFunc = M.getOrInsertFunction(
+        "__memory_check",
+        FunctionType::get(Type::getVoidTy(Context), {}, false)
     );
 
     GlobalVariable *CurrMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__curr_memory_usage", Type::getInt64Ty(Context)));
@@ -2446,7 +2497,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                 {
                     if (Function *Callee = Call->getCalledFunction())
                     {
-                        if (Callee->getName() == "__check_fuel" || Callee->getName() == "__commit_tls")
+                        if (Callee->getName() == "__check_fuel" || Callee->getName() == "__commit_tls" || Callee->getName() == "__memory_check")
                         {
                             hasRuntimeSignature = true;
                             continue;
@@ -2482,6 +2533,9 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                                 MaybeAlign(8),
                                 AtomicOrdering::Monotonic);
                             NewMaxMemoryUsage->setMetadata("op_sig", MDNode::get(Context, {}));
+
+                            Instruction *MemoryCheck = Builder.CreateCall(MemoryCheckFunc);
+                            MemoryCheck->setMetadata("op_sig", MDNode::get(Context, {}));
 
                             continue;
                         }
@@ -2543,6 +2597,9 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                                 AtomicOrdering::Monotonic);
                             NewMaxMemoryUsage->setMetadata("op_sig", MDNode::get(Context, {}));
 
+                            Instruction *MemoryCheck = Builder.CreateCall(MemoryCheckFunc);
+                            MemoryCheck->setMetadata("op_sig", MDNode::get(Context, {}));
+
                             continue;
                         }
 
@@ -2576,6 +2633,9 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                                 MaybeAlign(8),
                                 AtomicOrdering::Monotonic);
                             NewMaxMemoryUsage->setMetadata("op_sig", MDNode::get(Context, {}));
+
+                            Instruction *MemoryCheck = Builder.CreateCall(MemoryCheckFunc);
+                            MemoryCheck->setMetadata("op_sig", MDNode::get(Context, {}));
 
                             continue;
                         }
