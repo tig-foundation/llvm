@@ -2051,21 +2051,22 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
     GlobalVariable *RuntimeSigGlobal;
     GlobalVariable *ThreadLocalFuelGlobal;
     GlobalVariable *ThreadLocalRuntimeSigGlobal;
+    GlobalVariable *CurrMemoryUsageGlobal;
+    GlobalVariable *TotalMemoryUsageGlobal;
+    GlobalVariable *MaxMemoryUsageGlobal;
+    GlobalVariable *MaxAllowedMemoryUsageGlobal;    
     
     if (isFirstSrc)
     {
-        const char* fuelStr = std::getenv("FUEL");
-        unsigned fuel = fuelStr ? std::atoi(fuelStr) : 10000;
-
         // Create fuel globals
         FuelGlobal = new GlobalVariable(M,
             Type::getInt64Ty(Context),
             false,
             GlobalValue::ExternalLinkage,
-            ConstantInt::get(Type::getInt64Ty(Context), fuel),
+            ConstantInt::get(Type::getInt64Ty(Context), 0xFFFFFFFFFFFFFFFF),
             "__fuel_remaining");
         FuelGlobal->setAlignment(Align(8));
-        FuelGlobal->setDSOLocal(true);
+        //FuelGlobal->setDSOLocal(true);
 
         // Add thread-local variable for fuel tracking
         ThreadLocalFuelGlobal = new GlobalVariable(M,
@@ -2075,7 +2076,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             ConstantInt::get(Type::getInt64Ty(Context), 0),
             "__thread_local_fuel_used");
         ThreadLocalFuelGlobal->setAlignment(Align(8));
-        ThreadLocalFuelGlobal->setDSOLocal(true);
+        //ThreadLocalFuelGlobal->setDSOLocal(true);
         ThreadLocalFuelGlobal->setThreadLocal(true); 
 
         // Create runtime signature globals
@@ -2094,35 +2095,44 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             ConstantInt::get(Type::getInt64Ty(Context), 0),
             "__thread_local_runtime_signature");
         ThreadLocalRuntimeSigGlobal->setAlignment(Align(8));
-        ThreadLocalRuntimeSigGlobal->setDSOLocal(true);
+        //ThreadLocalRuntimeSigGlobal->setDSOLocal(true);
         ThreadLocalRuntimeSigGlobal->setThreadLocal(true);
 
-        GlobalVariable *CurrMemoryUsageGlobal = new GlobalVariable(M,
+        CurrMemoryUsageGlobal = new GlobalVariable(M,
             Type::getInt64Ty(Context),
             false,
             GlobalValue::ExternalLinkage,
             ConstantInt::get(Type::getInt64Ty(Context), 0),
             "__curr_memory_usage");
         CurrMemoryUsageGlobal->setAlignment(Align(8));
-        CurrMemoryUsageGlobal->setDSOLocal(true);
+        //CurrMemoryUsageGlobal->setDSOLocal(true);
 
-        GlobalVariable *TotalMemoryUsageGlobal = new GlobalVariable(M,
+        TotalMemoryUsageGlobal = new GlobalVariable(M,
             Type::getInt64Ty(Context),
             false,
             GlobalValue::ExternalLinkage,
             ConstantInt::get(Type::getInt64Ty(Context), 0),
             "__total_memory_usage");
         TotalMemoryUsageGlobal->setAlignment(Align(8));
-        TotalMemoryUsageGlobal->setDSOLocal(true);
+        //TotalMemoryUsageGlobal->setDSOLocal(true);
 
-        GlobalVariable *MaxMemoryUsageGlobal = new GlobalVariable(M,
+        MaxMemoryUsageGlobal = new GlobalVariable(M,
             Type::getInt64Ty(Context),
             false,
             GlobalValue::ExternalLinkage,
             ConstantInt::get(Type::getInt64Ty(Context), 0),
             "__max_memory_usage");
         MaxMemoryUsageGlobal->setAlignment(Align(8));
-        MaxMemoryUsageGlobal->setDSOLocal(true);
+        //MaxMemoryUsageGlobal->setDSOLocal(true);
+
+        MaxAllowedMemoryUsageGlobal = new GlobalVariable(M,
+            Type::getInt64Ty(Context),
+            false,
+            GlobalValue::ExternalLinkage,
+            ConstantInt::get(Type::getInt64Ty(Context), 0xFFFFFFFFFFFFFFFF),
+            "__max_allowed_memory_usage");
+        MaxAllowedMemoryUsageGlobal->setAlignment(Align(8));
+        MaxAllowedMemoryUsageGlobal->setDSOLocal(false);
 
         // Create check fuel function
         FunctionType *CheckFuelType = FunctionType::get(
@@ -2245,6 +2255,51 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         
         Builder.SetInsertPoint(EndBB);
         Builder.CreateRetVoid();
+
+        // memory check function    
+        FunctionType *MemoryCheckType = FunctionType::get(
+            Type::getVoidTy(Context),
+            {},
+            false
+        );
+
+        Function *MemoryCheckFunc = Function::Create(
+            MemoryCheckType,
+            GlobalValue::ExternalLinkage,
+            "__memory_check",
+            M
+        );
+
+        BasicBlock *MemoryCheckEntryBB = BasicBlock::Create(Context, "entry", MemoryCheckFunc);
+        BasicBlock *DoCheckBB = BasicBlock::Create(Context, "do_check", MemoryCheckFunc);
+        BasicBlock *ContinueBBMemoryCheck = BasicBlock::Create(Context, "continue", MemoryCheckFunc);
+        BasicBlock *ExitBBMemoryCheck = BasicBlock::Create(Context, "exit", MemoryCheckFunc);
+        
+        Builder.SetInsertPoint(MemoryCheckEntryBB);
+
+        Value *MaxAllowedMemoryUsage = Builder.CreateLoad(Type::getInt64Ty(Context), MaxAllowedMemoryUsageGlobal);
+        Value *ShouldDoCheck = Builder.CreateICmpUGT(
+            MaxAllowedMemoryUsage,
+            ConstantInt::get(Type::getInt64Ty(Context), 0)
+        );
+
+        Builder.CreateCondBr(ShouldDoCheck, DoCheckBB, ContinueBBMemoryCheck);
+
+        Builder.SetInsertPoint(DoCheckBB);
+        Value *CurrMemoryUsage = Builder.CreateLoad(Type::getInt64Ty(Context), CurrMemoryUsageGlobal);
+        Value *ShouldAbortMemoryCheck = Builder.CreateICmpUGT(
+            CurrMemoryUsage,
+            MaxAllowedMemoryUsage
+        );
+
+        Builder.CreateCondBr(ShouldAbortMemoryCheck, ExitBBMemoryCheck, ContinueBBMemoryCheck);
+
+        Builder.SetInsertPoint(ExitBBMemoryCheck);
+        Builder.CreateCall(ExitFunc, {ConstantInt::get(Type::getInt32Ty(Context), 83)});
+        Builder.CreateUnreachable();
+
+        Builder.SetInsertPoint(ContinueBBMemoryCheck);
+        Builder.CreateRetVoid();
     }
     else
     {
@@ -2254,6 +2309,18 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         
         RuntimeSigGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__runtime_signature", Type::getInt64Ty(Context)));
         RuntimeSigGlobal->setLinkage(GlobalValue::ExternalLinkage);
+
+        CurrMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__curr_memory_usage", Type::getInt64Ty(Context)));
+        CurrMemoryUsageGlobal->setLinkage(GlobalValue::ExternalLinkage);
+
+        TotalMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__total_memory_usage", Type::getInt64Ty(Context)));
+        TotalMemoryUsageGlobal->setLinkage(GlobalValue::ExternalLinkage);
+
+        MaxMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__max_memory_usage", Type::getInt64Ty(Context)));
+        MaxMemoryUsageGlobal->setLinkage(GlobalValue::ExternalLinkage);
+
+        MaxAllowedMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__max_allowed_memory_usage", Type::getInt64Ty(Context)));
+        MaxAllowedMemoryUsageGlobal->setLinkage(GlobalValue::ExternalLinkage);
     }
 
     // Get or ensure thread-local variables and commit function for all source files
@@ -2279,14 +2346,10 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         )
     );
 
-    GlobalVariable *CurrMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__curr_memory_usage", Type::getInt64Ty(Context)));
-    CurrMemoryUsageGlobal->setLinkage(GlobalValue::ExternalLinkage);
-
-    GlobalVariable *TotalMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__total_memory_usage", Type::getInt64Ty(Context)));
-    TotalMemoryUsageGlobal->setLinkage(GlobalValue::ExternalLinkage);
-
-    GlobalVariable *MaxMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__max_memory_usage", Type::getInt64Ty(Context)));
-    MaxMemoryUsageGlobal->setLinkage(GlobalValue::ExternalLinkage);
+    FunctionCallee MemoryCheckFunc = M.getOrInsertFunction(
+        "__memory_check",
+        FunctionType::get(Type::getVoidTy(Context), {}, false)
+    );
 
     MDNode *OpSigMD = MDNode::get(Context, {});
 
@@ -2446,7 +2509,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                 {
                     if (Function *Callee = Call->getCalledFunction())
                     {
-                        if (Callee->getName() == "__check_fuel" || Callee->getName() == "__commit_tls")
+                        if (Callee->getName() == "__check_fuel" || Callee->getName() == "__commit_tls" || Callee->getName() == "__memory_check")
                         {
                             hasRuntimeSignature = true;
                             continue;
@@ -2482,6 +2545,9 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                                 MaybeAlign(8),
                                 AtomicOrdering::Monotonic);
                             NewMaxMemoryUsage->setMetadata("op_sig", MDNode::get(Context, {}));
+
+                            Instruction *MemoryCheck = Builder.CreateCall(MemoryCheckFunc);
+                            MemoryCheck->setMetadata("op_sig", MDNode::get(Context, {}));
 
                             continue;
                         }
@@ -2543,6 +2609,9 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                                 AtomicOrdering::Monotonic);
                             NewMaxMemoryUsage->setMetadata("op_sig", MDNode::get(Context, {}));
 
+                            Instruction *MemoryCheck = Builder.CreateCall(MemoryCheckFunc);
+                            MemoryCheck->setMetadata("op_sig", MDNode::get(Context, {}));
+
                             continue;
                         }
 
@@ -2576,6 +2645,9 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                                 MaybeAlign(8),
                                 AtomicOrdering::Monotonic);
                             NewMaxMemoryUsage->setMetadata("op_sig", MDNode::get(Context, {}));
+
+                            Instruction *MemoryCheck = Builder.CreateCall(MemoryCheckFunc);
+                            MemoryCheck->setMetadata("op_sig", MDNode::get(Context, {}));
 
                             continue;
                         }
