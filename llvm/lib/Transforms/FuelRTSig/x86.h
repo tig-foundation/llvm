@@ -800,11 +800,179 @@ unsigned getGenericIntrinsicCostX86(StringRef Name)
     return 0;
 }
 
-unsigned getMemoryIntrinsicCostX86(CallInst *Call, StringRef Name) 
+Value *createMemcpyCostCalculationX86(Value *Size, unsigned BaseCost, 
+    IRBuilder<> &Builder, MDNode *OpSigMD) 
+{
+    LLVMContext &Ctx = Builder.getContext();
+    IntegerType *I64Ty = Builder.getInt64Ty();
+
+    Value *Size8 = ConstantInt::get(I64Ty, 8);
+    Value *Size32 = ConstantInt::get(I64Ty, 32);
+    Value *Size128 = ConstantInt::get(I64Ty, 128);
+    Value *Size1024 = ConstantInt::get(I64Ty, 1024);
+
+    // x86-64 specific costs
+    Value *Cost1 = ConstantInt::get(I64Ty, BaseCost + 1);   // <= 8: Single MOV
+    Value *Cost3 = ConstantInt::get(I64Ty, BaseCost + 3);   // <= 32: Unrolled MOVs  
+    Value *Cost6 = ConstantInt::get(I64Ty, BaseCost + 6);   // <= 128: SSE/AVX
+    Value *Cost20 = ConstantInt::get(I64Ty, BaseCost + 20); // <= 1024: Loop + overhead
+    Value *Cost35 = ConstantInt::get(I64Ty, BaseCost + 35); // > 1024: Library call
+
+    Value *Cmp8 = Builder.CreateICmpULE(Size, Size8);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp8))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp32 = Builder.CreateICmpULE(Size, Size32);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp32))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp128 = Builder.CreateICmpULE(Size, Size128);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp128))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp1024 = Builder.CreateICmpULE(Size, Size1024);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp1024))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel4 = Builder.CreateSelect(Cmp1024, Cost20, Cost35);
+    if (auto *Inst = dyn_cast<Instruction>(Sel4))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel3 = Builder.CreateSelect(Cmp128, Cost6, Sel4);
+    if (auto *Inst = dyn_cast<Instruction>(Sel3))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel2 = Builder.CreateSelect(Cmp32, Cost3, Sel3);
+    if (auto *Inst = dyn_cast<Instruction>(Sel2))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *FinalCost = Builder.CreateSelect(Cmp8, Cost1, Sel2);
+    if (auto *Inst = dyn_cast<Instruction>(FinalCost))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    return FinalCost;
+}
+
+Value *createMemsetCostCalculationX86(Value *Size, IRBuilder<> &Builder, MDNode *OpSigMD) 
+{
+    LLVMContext &Ctx = Builder.getContext();
+    IntegerType *I64Ty = Builder.getInt64Ty();
+
+    Value *Size8 = ConstantInt::get(I64Ty, 8);
+    Value *Size32 = ConstantInt::get(I64Ty, 32);  
+    Value *Size128 = ConstantInt::get(I64Ty, 128);
+    Value *Size1024 = ConstantInt::get(I64Ty, 1024);
+
+    // x86-64 memset costs
+    Value *Cost2 = ConstantInt::get(I64Ty, 2);   // <= 8: Single store
+    Value *Cost4 = ConstantInt::get(I64Ty, 4);   // <= 32: Unrolled stores
+    Value *Cost8 = ConstantInt::get(I64Ty, 8);   // <= 128: SSE/AVX stores  
+    Value *Cost25 = ConstantInt::get(I64Ty, 25); // <= 1024: Loop
+    Value *Cost45 = ConstantInt::get(I64Ty, 45); // > 1024: Library optimized
+
+    Value *Cmp8 = Builder.CreateICmpULE(Size, Size8);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp8))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp32 = Builder.CreateICmpULE(Size, Size32);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp32))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp128 = Builder.CreateICmpULE(Size, Size128);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp128))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp1024 = Builder.CreateICmpULE(Size, Size1024);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp1024))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel4 = Builder.CreateSelect(Cmp1024, Cost25, Cost45);
+    if (auto *Inst = dyn_cast<Instruction>(Sel4))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel3 = Builder.CreateSelect(Cmp128, Cost8, Sel4);
+    if (auto *Inst = dyn_cast<Instruction>(Sel3))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel2 = Builder.CreateSelect(Cmp32, Cost4, Sel3);
+    if (auto *Inst = dyn_cast<Instruction>(Sel2))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *FinalCost = Builder.CreateSelect(Cmp8, Cost2, Sel2);
+    if (auto *Inst = dyn_cast<Instruction>(FinalCost))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    return FinalCost;
+}
+
+
+unsigned insertDynamicMemoryCostX86(CallInst *Call, StringRef Name, Value *SizeArg, 
+                                        IRBuilder<> &Builder, MDNode *OpSigMD) 
+{
+    LLVMContext &Ctx = Builder.getContext();
+    IntegerType *I32Ty = Builder.getInt32Ty();
+    IntegerType *I64Ty = Builder.getInt64Ty();
+    
+    Value *Size = SizeArg;
+    if (Size->getType() != I64Ty) {
+        Size = Builder.CreateZExtOrTrunc(Size, I64Ty);
+        if (auto *Inst = dyn_cast<Instruction>(Size))
+            Inst->setMetadata("op_sig", OpSigMD);
+    }
+    
+    unsigned StaticBaseCost;
+    if (Name.starts_with("llvm.memmove")) {
+        StaticBaseCost = 3;
+    } else if (Name.starts_with("llvm.memcpy")) {
+        StaticBaseCost = 2;
+    } else if (Name.starts_with("llvm.memset")) {
+        StaticBaseCost = 0; 
+    } else {
+        return 5; 
+    }
+    
+    Value *DynamicCost;
+    
+    if (Name.starts_with("llvm.memset")) {
+        DynamicCost = createMemsetCostCalculationX86(Size, Builder, OpSigMD);
+    } else {
+        DynamicCost = createMemcpyCostCalculationX86(Size, StaticBaseCost, Builder, OpSigMD);
+    }
+    
+    if (DynamicCost->getType() != I64Ty) {
+        DynamicCost = Builder.CreateZExtOrTrunc(DynamicCost, I64Ty);
+        if (auto *Inst = dyn_cast<Instruction>(DynamicCost))
+            Inst->setMetadata("op_sig", OpSigMD);
+    }
+    
+    Module *M = Call->getModule();
+    LLVMContext &Context = M->getContext();
+    GlobalVariable *ThreadLocalFuelGlobal = cast<GlobalVariable>(M->getOrInsertGlobal("__thread_local_fuel_used", Type::getInt64Ty(Context)));
+    ThreadLocalFuelGlobal->setLinkage(GlobalValue::ExternalLinkage);
+    ThreadLocalFuelGlobal->setThreadLocal(true);
+    
+    if (ThreadLocalFuelGlobal) {
+        LoadInst *CurrentFuel = Builder.CreateLoad(I64Ty, ThreadLocalFuelGlobal);
+        CurrentFuel->setMetadata("op_sig", OpSigMD);
+        
+        Value *NewFuel = Builder.CreateAdd(CurrentFuel, DynamicCost);
+        if (auto *Inst = dyn_cast<Instruction>(NewFuel))
+            Inst->setMetadata("op_sig", OpSigMD);
+        
+        StoreInst *StoreFuel = Builder.CreateStore(NewFuel, ThreadLocalFuelGlobal);
+        StoreFuel->setMetadata("op_sig", OpSigMD);
+    }
+    
+    return 0; 
+}
+
+unsigned getMemoryIntrinsicCostX86(CallInst *Call, StringRef Name, IRBuilder<> &Builder, MDNode *OpSigMD) 
 {
     if (Call->arg_size() >= 3) 
     {
-        if (auto *SizeConst = dyn_cast<ConstantInt>(Call->getArgOperand(2))) 
+        Value *SizeArg = Call->getArgOperand(2);
+        
+        if (auto *SizeConst = dyn_cast<ConstantInt>(SizeArg)) 
         {
             uint64_t Size = SizeConst->getZExtValue();
             
@@ -812,28 +980,32 @@ unsigned getMemoryIntrinsicCostX86(CallInst *Call, StringRef Name)
             {
                 unsigned BaseCost = Name.starts_with("llvm.memmove") ? 3 : 2;
                 
-                if (Size <= 8)         return BaseCost + 2;  // x86 encoding overhead
-                if (Size <= 32)        return BaseCost + 3;  // SSE movups
-                if (Size <= 128)       return BaseCost + 5;  // AVX copies  
-                if (Size <= 1024)      return BaseCost + 15; // REP MOVSB sweet spot
-                return BaseCost + 35;  // Large memory bound
+                if (Size <= 8)         return BaseCost + 1;  // Single MOV instruction
+                if (Size <= 32)        return BaseCost + 3;  // Unrolled MOV instructions
+                if (Size <= 128)       return BaseCost + 6;  // SSE/AVX vector operations
+                if (Size <= 1024)      return BaseCost + 20; // Loop with good cache locality
+                return BaseCost + 35;  // Library call overhead
             }
             
             if (Name.starts_with("llvm.memset")) 
             {
-                if (Size <= 8)         return 3;  // mov + shift/or
-                if (Size <= 64)        return 5;  // SSE broadcast
-                if (Size <= 256)       return 8;  // AVX broadcast
-                if (Size <= 1024)      return 20; // REP STOSB
-                return 45;
+                if (Size <= 8)         return 2;  // Single store instruction
+                if (Size <= 32)        return 4;  // Unrolled stores
+                if (Size <= 128)       return 8;  // SSE/AVX broadcast stores
+                if (Size <= 1024)      return 25; // Loop overhead
+                return 45;            // Library optimized routine
             }
+        }
+        else 
+        {
+            return insertDynamicMemoryCostX86(Call, Name, SizeArg, Builder, OpSigMD);
         }
     }
     
-    // Fallbacks
-    if (Name.starts_with("llvm.memcpy"))   return 8;
-    if (Name.starts_with("llvm.memmove"))  return 10;
-    if (Name.starts_with("llvm.memset"))   return 6;
+    if (Name.starts_with("llvm.memcpy"))   return 6; 
+    if (Name.starts_with("llvm.memmove"))  return 8;
+    if (Name.starts_with("llvm.memset"))   return 5;
+    
     return 0;
 }
 
@@ -844,13 +1016,17 @@ unsigned getFuelCostX86(Instruction &I)
     bool isVector = Ty->isVectorTy();
     unsigned baseCost = 0;
 
+    IRBuilder<> Builder(I.getNextNode());
+    MDNode *OpSigMD = MDNode::get(I.getContext(), {});
+
     if (auto *Call = dyn_cast<CallInst>(&I))
     {
         if (Function *Callee = Call->getCalledFunction())
         {
             if (Callee->isIntrinsic())
             {
-                if (unsigned cost = getMemoryIntrinsicCostX86(Call, Callee->getName()))
+                StringRef Name = Callee->getName();
+                if (unsigned cost = getMemoryIntrinsicCostX86(Call, Name, Builder, OpSigMD))
                     return cost;
 
                 if (unsigned cost = getIntrinsicCostX86(Callee->getName()))

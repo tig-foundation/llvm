@@ -914,11 +914,177 @@ unsigned getGenericIntrinsicCostAArch64(StringRef Name)
     return 0;
 }
 
-unsigned getMemoryIntrinsicCostAArch64(CallInst *Call, StringRef Name) 
+Value *createMemcpyCostCalculationAArch64(Value *Size, unsigned BaseCost, 
+    IRBuilder<> &Builder, MDNode *OpSigMD) 
+{
+    LLVMContext &Ctx = Builder.getContext();
+    IntegerType *I64Ty = Builder.getInt64Ty();
+
+    Value *Size8 = ConstantInt::get(I64Ty, 8);
+    Value *Size32 = ConstantInt::get(I64Ty, 32);
+    Value *Size128 = ConstantInt::get(I64Ty, 128);
+    Value *Size1024 = ConstantInt::get(I64Ty, 1024);
+
+    Value *Cost1 = ConstantInt::get(I64Ty, BaseCost + 1);   // <= 8
+    Value *Cost2 = ConstantInt::get(I64Ty, BaseCost + 2);   // <= 32  
+    Value *Cost4 = ConstantInt::get(I64Ty, BaseCost + 4);   // <= 128
+    Value *Cost18 = ConstantInt::get(I64Ty, BaseCost + 18); // <= 1024
+    Value *Cost30 = ConstantInt::get(I64Ty, BaseCost + 30); // > 1024
+
+    Value *Cmp8 = Builder.CreateICmpULE(Size, Size8);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp8))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp32 = Builder.CreateICmpULE(Size, Size32);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp32))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp128 = Builder.CreateICmpULE(Size, Size128);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp128))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp1024 = Builder.CreateICmpULE(Size, Size1024);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp1024))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel4 = Builder.CreateSelect(Cmp1024, Cost18, Cost30);
+    if (auto *Inst = dyn_cast<Instruction>(Sel4))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel3 = Builder.CreateSelect(Cmp128, Cost4, Sel4);
+    if (auto *Inst = dyn_cast<Instruction>(Sel3))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel2 = Builder.CreateSelect(Cmp32, Cost2, Sel3);
+    if (auto *Inst = dyn_cast<Instruction>(Sel2))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *FinalCost = Builder.CreateSelect(Cmp8, Cost1, Sel2);
+    if (auto *Inst = dyn_cast<Instruction>(FinalCost))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    return FinalCost;
+}
+
+Value *createMemsetCostCalculationAArch64(Value *Size, IRBuilder<> &Builder, MDNode *OpSigMD) 
+{
+    LLVMContext &Ctx = Builder.getContext();
+    IntegerType *I64Ty = Builder.getInt64Ty();
+
+    Value *Size8 = ConstantInt::get(I64Ty, 8);
+    Value *Size32 = ConstantInt::get(I64Ty, 32);  
+    Value *Size128 = ConstantInt::get(I64Ty, 128);
+    Value *Size1024 = ConstantInt::get(I64Ty, 1024);
+
+    Value *Cost2 = ConstantInt::get(I64Ty, 2);   // <= 8
+    Value *Cost3 = ConstantInt::get(I64Ty, 3);   // <= 32
+    Value *Cost6 = ConstantInt::get(I64Ty, 6);   // <= 128  
+    Value *Cost22 = ConstantInt::get(I64Ty, 22); // <= 1024
+    Value *Cost40 = ConstantInt::get(I64Ty, 40); // > 1024
+
+    Value *Cmp8 = Builder.CreateICmpULE(Size, Size8);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp8))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp32 = Builder.CreateICmpULE(Size, Size32);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp32))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp128 = Builder.CreateICmpULE(Size, Size128);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp128))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Cmp1024 = Builder.CreateICmpULE(Size, Size1024);
+    if (auto *Inst = dyn_cast<Instruction>(Cmp1024))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel4 = Builder.CreateSelect(Cmp1024, Cost22, Cost40);
+    if (auto *Inst = dyn_cast<Instruction>(Sel4))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel3 = Builder.CreateSelect(Cmp128, Cost6, Sel4);
+    if (auto *Inst = dyn_cast<Instruction>(Sel3))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *Sel2 = Builder.CreateSelect(Cmp32, Cost3, Sel3);
+    if (auto *Inst = dyn_cast<Instruction>(Sel2))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    Value *FinalCost = Builder.CreateSelect(Cmp8, Cost2, Sel2);
+    if (auto *Inst = dyn_cast<Instruction>(FinalCost))
+        Inst->setMetadata("op_sig", OpSigMD);
+
+    return FinalCost;
+}
+
+
+unsigned insertDynamicMemoryCostAArch64(CallInst *Call, StringRef Name, Value *SizeArg, 
+                                        IRBuilder<> &Builder, MDNode *OpSigMD) 
+{
+    LLVMContext &Ctx = Builder.getContext();
+    IntegerType *I32Ty = Builder.getInt32Ty();
+    IntegerType *I64Ty = Builder.getInt64Ty();
+    
+    Value *Size = SizeArg;
+    if (Size->getType() != I64Ty) {
+        Size = Builder.CreateZExtOrTrunc(Size, I64Ty);
+        if (auto *Inst = dyn_cast<Instruction>(Size))
+            Inst->setMetadata("op_sig", OpSigMD);
+    }
+    
+    unsigned StaticBaseCost;
+    if (Name.starts_with("llvm.memmove")) {
+        StaticBaseCost = 3;
+    } else if (Name.starts_with("llvm.memcpy")) {
+        StaticBaseCost = 2;
+    } else if (Name.starts_with("llvm.memset")) {
+        StaticBaseCost = 0; 
+    } else {
+        return 5; 
+    }
+    
+    Value *DynamicCost;
+    
+    if (Name.starts_with("llvm.memset")) {
+        DynamicCost = createMemsetCostCalculationAArch64(Size, Builder, OpSigMD);
+    } else {
+        DynamicCost = createMemcpyCostCalculationAArch64(Size, StaticBaseCost, Builder, OpSigMD);
+    }
+    
+    if (DynamicCost->getType() != I64Ty) {
+        DynamicCost = Builder.CreateZExtOrTrunc(DynamicCost, I64Ty);
+        if (auto *Inst = dyn_cast<Instruction>(DynamicCost))
+            Inst->setMetadata("op_sig", OpSigMD);
+    }
+    
+    Module *M = Call->getModule();
+    LLVMContext &Context = M->getContext();
+    GlobalVariable *ThreadLocalFuelGlobal = cast<GlobalVariable>(M->getOrInsertGlobal("__thread_local_fuel_used", Type::getInt64Ty(Context)));
+    ThreadLocalFuelGlobal->setLinkage(GlobalValue::ExternalLinkage);
+    ThreadLocalFuelGlobal->setThreadLocal(true);
+    
+    if (ThreadLocalFuelGlobal) {
+        LoadInst *CurrentFuel = Builder.CreateLoad(I64Ty, ThreadLocalFuelGlobal);
+        CurrentFuel->setMetadata("op_sig", OpSigMD);
+        
+        Value *NewFuel = Builder.CreateAdd(CurrentFuel, DynamicCost);
+        if (auto *Inst = dyn_cast<Instruction>(NewFuel))
+            Inst->setMetadata("op_sig", OpSigMD);
+        
+        StoreInst *StoreFuel = Builder.CreateStore(NewFuel, ThreadLocalFuelGlobal);
+        StoreFuel->setMetadata("op_sig", OpSigMD);
+    }
+    
+    return 0; 
+}
+
+unsigned getMemoryIntrinsicCostAArch64(CallInst *Call, StringRef Name, IRBuilder<> &Builder, MDNode *OpSigMD) 
 {
     if (Call->arg_size() >= 3) 
     {
-        if (auto *SizeConst = dyn_cast<ConstantInt>(Call->getArgOperand(2))) 
+        Value *SizeArg = Call->getArgOperand(2);
+        
+        if (auto *SizeConst = dyn_cast<ConstantInt>(SizeArg)) 
         {
             uint64_t Size = SizeConst->getZExtValue();
             
@@ -942,14 +1108,18 @@ unsigned getMemoryIntrinsicCostAArch64(CallInst *Call, StringRef Name)
                 return 40;
             }
         }
+        else 
+        {
+            return insertDynamicMemoryCostAArch64(Call, Name, SizeArg, Builder, OpSigMD);
+        }
     }
     
-    // Fallbacks  
-    if (Name.starts_with("llvm.memcpy"))   return 6;  // Slightly better than x86
+    if (Name.starts_with("llvm.memcpy"))   return 6; 
     if (Name.starts_with("llvm.memmove"))  return 8;
     if (Name.starts_with("llvm.memset"))   return 5;
     return 0;
 }
+
 
 unsigned getFuelCostAArch64(Instruction &I)
 {
@@ -958,14 +1128,20 @@ unsigned getFuelCostAArch64(Instruction &I)
     bool isVector = Ty->isVectorTy();
     unsigned baseCost = 0;
 
+    MDNode *OpSigMD = MDNode::get(I.getContext(), {});
+
     if (auto *Call = dyn_cast<CallInst>(&I))
     {
         if (Function *Callee = Call->getCalledFunction())
         {
             if (Callee->isIntrinsic())
             {
-                if (unsigned cost = getMemoryIntrinsicCostAArch64(Call, Callee->getName()))
-                    return cost;
+                StringRef Name = Callee->getName();       
+                if (Name.starts_with("llvm.memcpy") || Name.starts_with("llvm.memmove") || Name.starts_with("llvm.memset"))
+                {
+                    IRBuilder<> Builder(Call->getNextNode()); 
+                    return getMemoryIntrinsicCostAArch64(Call, Name, Builder, OpSigMD);
+                }
 
                 if (unsigned cost = getIntrinsicCostAArch64(Callee->getName()))
                     return cost;
