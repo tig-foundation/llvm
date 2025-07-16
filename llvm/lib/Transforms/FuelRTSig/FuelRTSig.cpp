@@ -600,7 +600,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             Type::getInt64Ty(Context),
             false,
             GlobalValue::ExternalLinkage,
-            ConstantInt::get(Type::getInt64Ty(Context), 0xFFFFFFFFFFFFFFFF),
+            ConstantInt::get(Type::getInt64Ty(Context), 0x7FFFFFFFFFFFFFFF),
             "__fuel_remaining");
         FuelGlobal->setAlignment(Align(8));
         //FuelGlobal->setDSOLocal(true);
@@ -1000,9 +1000,11 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                     
                     // Update thread-local signature
                     Value* CurrentThreadSig = Builder.CreateLoad(Type::getInt64Ty(Context), ThreadLocalRuntimeSigGlobal);
+                    (Instruction*)CurrentThreadSig->setMetadata("op_sig", OpSigMD);
                     Value* NewThreadSig = Builder.CreateXor(CurrentThreadSig, ConstantInt::get(Type::getInt64Ty(Context), BlockSig));
+                    (Instruction*)NewThreadSig->setMetadata("op_sig", OpSigMD);
                     Instruction* StoreInst = Builder.CreateStore(NewThreadSig, ThreadLocalRuntimeSigGlobal);
-                    StoreInst->setMetadata("op_sig", OpSigMD);
+                    (Instruction*)StoreInst->setMetadata("op_sig", OpSigMD);
 
                     for (Instruction* I : InstrToMark)
                         I->setMetadata("mark_instr", OpSigMD);
@@ -1098,8 +1100,9 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                             Builder.SetInsertPoint(Call);
                             Value *OldSize = Call->getArgOperand(1);
                             Value *NewSize = Call->getArgOperand(3);
-                            
+
                             Value *SizeDiff = Builder.CreateSub(NewSize, OldSize);
+                            (Instruction*)SizeDiff->setMetadata("op_sig", OpSigMD);
 
                             Instruction *NewCurrMemoryUsage = Builder.CreateAtomicRMW(
                                 AtomicRMWInst::Add,
@@ -1115,6 +1118,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                                 SizeDiff,
                                 ConstantInt::get(Type::getInt64Ty(Context), 0)
                             );
+                            (Instruction*)PositiveSizeDiff->setMetadata("op_sig", OpSigMD);
 
                             Instruction *NewTotalMemoryUsage = Builder.CreateAtomicRMW(
                                 AtomicRMWInst::Add,
@@ -1179,7 +1183,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                 }
 
                 if (!hasRuntimeSignature)
-                    hasRuntimeSignature = F.getName() == "__check_fuel" || F.getName() == "__commit_tls";
+                    hasRuntimeSignature = F.getName() == "__check_fuel" || F.getName() == "__commit_tls" || F.getName() == "__memory_check";
 
                 if (!hasRuntimeSignature && I.getMetadata("op_sig"))
                     hasRuntimeSignature = true;
@@ -1195,11 +1199,14 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             {
                 Builder.SetInsertPoint(&*BB.getFirstInsertionPt());
                 Value *CurrentThreadFuel = Builder.CreateLoad(Type::getInt64Ty(Context), ThreadLocalFuelGlobal);
+                (Instruction*)CurrentThreadFuel->setMetadata("op_sig", OpSigMD);
 
                 Value *NewThreadFuel = Builder.CreateAdd(CurrentThreadFuel, 
                     ConstantInt::get(Type::getInt64Ty(Context), BlockFuelCost));
+                (Instruction*)NewThreadFuel->setMetadata("op_sig", OpSigMD);
 
-                Builder.CreateStore(NewThreadFuel, ThreadLocalFuelGlobal);
+                Instruction *StoreFuel = Builder.CreateStore(NewThreadFuel, ThreadLocalFuelGlobal);
+                (Instruction*)StoreFuel->setMetadata("op_sig", OpSigMD);
             }
         }
 
@@ -1209,7 +1216,8 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             for (auto &BB : F) {
                 if (auto *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
                     Builder.SetInsertPoint(RI);
-                    Builder.CreateCall(CommitFunc);
+                    Instruction *Commit = Builder.CreateCall(CommitFunc);
+                    (Instruction*)Commit->setMetadata("op_sig", OpSigMD);
                 }
             }
         }
