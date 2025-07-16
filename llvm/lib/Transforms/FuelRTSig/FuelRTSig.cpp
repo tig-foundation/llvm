@@ -864,15 +864,6 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         "__commit_tls",
         FunctionType::get(Type::getVoidTy(Context), {}, false)
     );
-    
-    FunctionCallee CheckFuelFunc = M.getOrInsertFunction(
-        "__check_fuel",
-        FunctionType::get(
-            Type::getVoidTy(Context),
-            {Type::getInt64Ty(Context)},
-            false
-        )
-    );
 
     FunctionCallee MemoryCheckFunc = M.getOrInsertFunction(
         "__memory_check",

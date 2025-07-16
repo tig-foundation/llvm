@@ -803,7 +803,6 @@ unsigned getGenericIntrinsicCostX86(StringRef Name)
 Value *createMemcpyCostCalculationX86(Value *Size, unsigned BaseCost, 
     IRBuilder<> &Builder, MDNode *OpSigMD) 
 {
-    LLVMContext &Ctx = Builder.getContext();
     IntegerType *I64Ty = Builder.getInt64Ty();
 
     Value *Size8 = ConstantInt::get(I64Ty, 8);
@@ -855,7 +854,6 @@ Value *createMemcpyCostCalculationX86(Value *Size, unsigned BaseCost,
 
 Value *createMemsetCostCalculationX86(Value *Size, IRBuilder<> &Builder, MDNode *OpSigMD) 
 {
-    LLVMContext &Ctx = Builder.getContext();
     IntegerType *I64Ty = Builder.getInt64Ty();
 
     Value *Size8 = ConstantInt::get(I64Ty, 8);
@@ -909,8 +907,6 @@ Value *createMemsetCostCalculationX86(Value *Size, IRBuilder<> &Builder, MDNode 
 unsigned insertDynamicMemoryCostX86(CallInst *Call, StringRef Name, Value *SizeArg, 
                                         IRBuilder<> &Builder, MDNode *OpSigMD) 
 {
-    LLVMContext &Ctx = Builder.getContext();
-    IntegerType *I32Ty = Builder.getInt32Ty();
     IntegerType *I64Ty = Builder.getInt64Ty();
     
     Value *Size = SizeArg;
