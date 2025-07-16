@@ -35,7 +35,7 @@ using namespace llvm;
 static bool isInstructionSafe(const Instruction &I)
 {
     // Only filter truly unsafe operations
-    if (isa<FenceInst>(&I))
+    /*if (isa<FenceInst>(&I))
         return false;
 
     // Skip volatile memory operations as they might have special semantics
@@ -45,7 +45,7 @@ static bool isInstructionSafe(const Instruction &I)
 
     if (auto* MI = dyn_cast<StoreInst>(&I))
         if (MI->isVolatile())
-            return false;
+            return false;*/
 
     // Skip vector operations that might be converted to NEON/SVE
     /*if (auto* VL = dyn_cast<VectorType>(I.getType())) {
