@@ -1113,8 +1113,11 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                             );
                             NewCurrMemoryUsage->setMetadata("op_sig", MDNode::get(Context, {}));
 
+                            Value *IsPositiveSizeDiff = Builder.CreateICmpSGT(NewSize, OldSize);
+                            ((Instruction*)(IsPositiveSizeDiff))->setMetadata("op_sig", OpSigMD);
+
                             Value *PositiveSizeDiff = Builder.CreateSelect(
-                                Builder.CreateICmpSGT(NewSize, OldSize),
+                                IsPositiveSizeDiff,
                                 SizeDiff,
                                 ConstantInt::get(Type::getInt64Ty(Context), 0)
                             );
