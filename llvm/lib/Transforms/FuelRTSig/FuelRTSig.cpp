@@ -875,7 +875,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
     for (auto &F : M)
     {
         if (F.isDeclaration() || F.isIntrinsic() || F.getName().starts_with("llvm.") ||
-            F.getName() == "__check_fuel" || F.getName() == "__commit_tls")
+            F.getName() == "__check_fuel" || F.getName() == "__commit_tls" || F.getName() == "__memory_check")
             continue;
 
         //errs() << llFileBaseName << "::" << rustDemangle(F.getName().str()) << "\n";
