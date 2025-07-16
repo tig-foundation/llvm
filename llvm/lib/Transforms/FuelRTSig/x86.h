@@ -947,17 +947,15 @@ unsigned insertDynamicMemoryCostX86(CallInst *Call, StringRef Name, Value *SizeA
     ThreadLocalFuelGlobal->setLinkage(GlobalValue::ExternalLinkage);
     ThreadLocalFuelGlobal->setThreadLocal(true);
     
-    if (ThreadLocalFuelGlobal) {
-        LoadInst *CurrentFuel = Builder.CreateLoad(I64Ty, ThreadLocalFuelGlobal);
-        CurrentFuel->setMetadata("op_sig", OpSigMD);
+    LoadInst *CurrentFuel = Builder.CreateLoad(I64Ty, ThreadLocalFuelGlobal);
+    CurrentFuel->setMetadata("op_sig", OpSigMD);
         
-        Value *NewFuel = Builder.CreateAdd(CurrentFuel, DynamicCost);
-        if (auto *Inst = dyn_cast<Instruction>(NewFuel))
-            Inst->setMetadata("op_sig", OpSigMD);
+    Value *NewFuel = Builder.CreateAdd(CurrentFuel, DynamicCost);
+    if (auto *Inst = dyn_cast<Instruction>(NewFuel))
+        Inst->setMetadata("op_sig", OpSigMD);
         
-        StoreInst *StoreFuel = Builder.CreateStore(NewFuel, ThreadLocalFuelGlobal);
-        StoreFuel->setMetadata("op_sig", OpSigMD);
-    }
+    StoreInst *StoreFuel = Builder.CreateStore(NewFuel, ThreadLocalFuelGlobal);
+    StoreFuel->setMetadata("op_sig", OpSigMD);
     
     return 0; 
 }
