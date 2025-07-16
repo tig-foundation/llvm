@@ -557,6 +557,8 @@ unsigned getFuelCost(Instruction &I)
         TargetTriple.contains("arm")) {
         return getFuelCostAArch64(I);
     }
+
+    errs() << "Unknown architecture: " << TargetTriple << "\n";
     
     // Fallback for unknown architectures
     return 0;//getFuelCostGeneric(I);

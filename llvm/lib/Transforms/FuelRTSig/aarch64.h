@@ -1139,7 +1139,7 @@ unsigned getFuelCostAArch64(Instruction &I)
                 StringRef Name = Callee->getName();       
                 if (Name.starts_with("llvm.memcpy") || Name.starts_with("llvm.memmove") || Name.starts_with("llvm.memset"))
                 {
-                    IRBuilder<> Builder(Call->getNextNode()); 
+                    IRBuilder<> Builder(Call); 
                     return getMemoryIntrinsicCostAArch64(Call, Name, Builder, OpSigMD);
                 }
 

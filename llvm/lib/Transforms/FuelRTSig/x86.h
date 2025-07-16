@@ -1016,7 +1016,6 @@ unsigned getFuelCostX86(Instruction &I)
     bool isVector = Ty->isVectorTy();
     unsigned baseCost = 0;
 
-    IRBuilder<> Builder(I.getNextNode());
     MDNode *OpSigMD = MDNode::get(I.getContext(), {});
 
     if (auto *Call = dyn_cast<CallInst>(&I))
@@ -1025,6 +1024,7 @@ unsigned getFuelCostX86(Instruction &I)
         {
             if (Callee->isIntrinsic())
             {
+                IRBuilder<> Builder(Call);
                 StringRef Name = Callee->getName();
                 if (unsigned cost = getMemoryIntrinsicCostX86(Call, Name, Builder, OpSigMD))
                     return cost;
