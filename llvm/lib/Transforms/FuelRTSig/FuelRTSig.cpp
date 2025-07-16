@@ -1000,11 +1000,11 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                     
                     // Update thread-local signature
                     Value* CurrentThreadSig = Builder.CreateLoad(Type::getInt64Ty(Context), ThreadLocalRuntimeSigGlobal);
-                    (Instruction*)CurrentThreadSig->setMetadata("op_sig", OpSigMD);
+                    ((Instruction *)(CurrentThreadSig))->setMetadata("op_sig", OpSigMD);
                     Value* NewThreadSig = Builder.CreateXor(CurrentThreadSig, ConstantInt::get(Type::getInt64Ty(Context), BlockSig));
-                    (Instruction*)NewThreadSig->setMetadata("op_sig", OpSigMD);
+                    ((Instruction *)(NewThreadSig))->setMetadata("op_sig", OpSigMD);
                     Instruction* StoreInst = Builder.CreateStore(NewThreadSig, ThreadLocalRuntimeSigGlobal);
-                    (Instruction*)StoreInst->setMetadata("op_sig", OpSigMD);
+                    (StoreInst)->setMetadata("op_sig", OpSigMD);
 
                     for (Instruction* I : InstrToMark)
                         I->setMetadata("mark_instr", OpSigMD);
@@ -1102,7 +1102,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                             Value *NewSize = Call->getArgOperand(3);
 
                             Value *SizeDiff = Builder.CreateSub(NewSize, OldSize);
-                            (Instruction*)SizeDiff->setMetadata("op_sig", OpSigMD);
+                            ((Instruction*)(SizeDiff))->setMetadata("op_sig", OpSigMD);
 
                             Instruction *NewCurrMemoryUsage = Builder.CreateAtomicRMW(
                                 AtomicRMWInst::Add,
@@ -1118,7 +1118,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                                 SizeDiff,
                                 ConstantInt::get(Type::getInt64Ty(Context), 0)
                             );
-                            (Instruction*)PositiveSizeDiff->setMetadata("op_sig", OpSigMD);
+                            ((Instruction*)(PositiveSizeDiff))->setMetadata("op_sig", OpSigMD);
 
                             Instruction *NewTotalMemoryUsage = Builder.CreateAtomicRMW(
                                 AtomicRMWInst::Add,
@@ -1199,14 +1199,14 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             {
                 Builder.SetInsertPoint(&*BB.getFirstInsertionPt());
                 Value *CurrentThreadFuel = Builder.CreateLoad(Type::getInt64Ty(Context), ThreadLocalFuelGlobal);
-                (Instruction*)CurrentThreadFuel->setMetadata("op_sig", OpSigMD);
+                ((Instruction*)(CurrentThreadFuel))->setMetadata("op_sig", OpSigMD);
 
                 Value *NewThreadFuel = Builder.CreateAdd(CurrentThreadFuel, 
                     ConstantInt::get(Type::getInt64Ty(Context), BlockFuelCost));
-                (Instruction*)NewThreadFuel->setMetadata("op_sig", OpSigMD);
+                ((Instruction*)(NewThreadFuel))->setMetadata("op_sig", OpSigMD);
 
                 Instruction *StoreFuel = Builder.CreateStore(NewThreadFuel, ThreadLocalFuelGlobal);
-                (Instruction*)StoreFuel->setMetadata("op_sig", OpSigMD);
+                ((Instruction*)(StoreFuel))->setMetadata("op_sig", OpSigMD);
             }
         }
 
@@ -1217,7 +1217,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
                 if (auto *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
                     Builder.SetInsertPoint(RI);
                     Instruction *Commit = Builder.CreateCall(CommitFunc);
-                    (Instruction*)Commit->setMetadata("op_sig", OpSigMD);
+                    Commit->setMetadata("op_sig", OpSigMD);
                 }
             }
         }
