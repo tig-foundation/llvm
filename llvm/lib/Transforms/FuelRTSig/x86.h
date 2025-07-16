@@ -1018,10 +1018,12 @@ unsigned getFuelCostX86(Instruction &I)
         {
             if (Callee->isIntrinsic())
             {
-                IRBuilder<> Builder(Call);
-                StringRef Name = Callee->getName();
-                if (unsigned cost = getMemoryIntrinsicCostX86(Call, Name, Builder, OpSigMD))
-                    return cost;
+                StringRef Name = Callee->getName();       
+                if (Name.starts_with("llvm.memcpy") || Name.starts_with("llvm.memmove") || Name.starts_with("llvm.memset"))
+                {
+                    IRBuilder<> Builder(Call); 
+                    return getMemoryIntrinsicCostX86(Call, Name, Builder, OpSigMD);
+                }
 
                 if (unsigned cost = getIntrinsicCostX86(Callee->getName()))
                     return cost;
