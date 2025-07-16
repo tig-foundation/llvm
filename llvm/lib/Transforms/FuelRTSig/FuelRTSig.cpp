@@ -885,12 +885,17 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             strstr(rustDemangle(F.getName().str()).c_str(), "::thread"))
         )
         {
-            uint64_t FuncHash = hash_value(F.getName());
-            errs() << "skipping " << llFileBaseName << " :: " << F.getName() << " (" << rustDemangle(F.getName().str()) << ") [hash: " << FuncHash << "]\n";
+            const char* outputSkippedFunctionsStr = std::getenv("OUTPUT_SKIPPED_FUNCTIONS");
+            int outputSkippedFunctions = outputSkippedFunctionsStr ? std::atoi(outputSkippedFunctionsStr) : 0;
+            if (outputSkippedFunctions)
+            {
+                uint64_t FuncHash = hash_value(F.getName());
+                errs() << "skipping " << llFileBaseName << " :: " << F.getName() << " (" << rustDemangle(F.getName().str()) << ") [hash: " << FuncHash << "]\n";
+            }
             continue;
         }
 
-        if (strcmp(llFileBaseName, "tig_algorithms") == 0 &&
+        /*if (strcmp(llFileBaseName, "tig_algorithms") == 0 &&
             (strstr(rustDemangle(F.getName().str()).c_str(), "rayon") ||
             strstr(rustDemangle(F.getName().str()).c_str(), "crossbeam"))
         )
@@ -898,7 +903,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             uint64_t FuncHash = hash_value(F.getName());
             errs() << "skipping " << llFileBaseName << " :: " << F.getName() << " (" << rustDemangle(F.getName().str()) << ") [hash: " << FuncHash << "]\n";
             continue;
-        }
+        }*/
 
         if (instrumentRTSig)
         {
