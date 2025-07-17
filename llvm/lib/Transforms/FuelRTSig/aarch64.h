@@ -1663,7 +1663,7 @@ unsigned getFuelCostAArch64(Instruction &I)
             break;
 
         case Instruction::FNeg:
-            isFloatingOp = true;
+            //isFloatingOp = true;
             baseCost = 1;
             break;
 
