@@ -1,18 +1,19 @@
-unsigned getIntrinsicCostAArch64(StringRef Name)
+#include "llvm/IR/IntrinsicsAArch64.h"
+
+unsigned getIntrinsicCostAArch64(StringRef Name, IRBuilder<> &Builder, CallInst *CI, MDNode *OpSigMD)
 {
-    // Softened helpers for consistency with X86
     auto getVectorWidthMultiplier = [](StringRef Name) -> unsigned {
         if (Name.contains(".v16")) return 4;  // Wide NEON/SVE equivalent
         if (Name.contains(".v8")) return 3;
         if (Name.contains(".v4")) return 2;
         if (Name.contains(".v2")) return 1;   // Narrow
-        if (Name.starts_with("llvm.aarch64.sve")) return 4;  // SVE scalable premium
+        if (Name.starts_with("llvm.aarch64.sve")) return 4;  // SVE scalable premium (static base; dynamic scaling handled separately)
         return 2;  // Default NEON
     };
-
-    auto getDataTypeAdjustment = [](StringRef Name) -> unsigned {  // Additive
-        if (Name.ends_with("f64") || Name.ends_with("i64")) return 2;  // +2 for 64-bit
-        if (Name.ends_with("f32") || Name.ends_with("i32")) return 1;
+    
+    auto getDataTypeAdjustment = [](StringRef Name) -> unsigned {  // Additive; align to FP-specific for +2 on f64 (matching x86/NEON behavior)
+        if (Name.ends_with("f64")) return 2;  // +2 only for FP64 (not i64)
+        if (Name.ends_with("f32") || Name.ends_with("i32") || Name.ends_with("i64")) return 1;
         if (Name.ends_with("f16") || Name.ends_with("i16")) return 1;
         if (Name.ends_with("i8")) return 1;
         return 1;  // Default +1
@@ -20,11 +21,68 @@ unsigned getIntrinsicCostAArch64(StringRef Name)
 
     auto isElementSensitive = [](StringRef Name) -> bool {
         return Name.contains(".div") || Name.contains(".sqrt") || 
-               Name.contains(".cvt") || Name.contains(".fcvt") || 
-               Name.contains(".mul") || Name.contains(".fma") || 
-               Name.contains(".fmla") || Name.contains(".fmls") ||
-               Name.contains(".vqdmulh") || Name.contains(".sqrdmulh") ||
-               Name.contains(".reduce");
+            Name.contains(".cvt") || Name.contains(".fcvt") || 
+            Name.contains(".mul") || Name.contains(".fma") || 
+            Name.contains(".fmla") || Name.contains(".fmls") ||
+            Name.contains(".vqdmulh") || Name.contains(".sqrdmulh") ||
+            Name.contains(".reduce") ||  // Expanded for SVE reductions
+            Name.contains(".uaddv") || Name.contains(".saddv") ||
+            Name.contains(".umaxv") || Name.contains(".smaxv") ||
+            Name.contains(".uminv") || Name.contains(".sminv") ||
+            Name.contains(".faddv") || Name.contains(".fmaxv") ||
+            Name.contains(".fminv") || Name.contains(".fmaxnmv") ||
+            Name.contains(".fminnmv") || Name.contains(".fadda") ||
+            Name.contains(".trn1") || Name.contains(".trn2") ||
+            Name.contains(".uzp1") || Name.contains(".uzp2") ||
+            Name.contains(".zip1") || Name.contains(".zip2") ||
+            Name.contains(".qadd") || Name.contains(".qsub") ||
+            Name.contains(".sqadd") || Name.contains(".sqsub") ||
+            Name.contains(".uqadd") || Name.contains(".uqsub");
+    };
+
+    auto getRuntimeVectorLength = [](IRBuilder<>& Builder, Type* ElementType) -> Value* {
+        unsigned ElementSizeBytes = ElementType->getPrimitiveSizeInBits() / 8;
+
+        switch (ElementSizeBytes) {
+            case 1:
+                return Builder.CreateIntrinsic(Intrinsic::aarch64_sve_cntb, {}, {Builder.getInt32(31)});
+            case 2:
+                return Builder.CreateIntrinsic(Intrinsic::aarch64_sve_cnth, {}, {Builder.getInt32(31)});
+            case 4:
+                return Builder.CreateIntrinsic(Intrinsic::aarch64_sve_cntw, {}, {Builder.getInt32(31)});
+            case 8:
+                return Builder.CreateIntrinsic(Intrinsic::aarch64_sve_cntd, {}, {Builder.getInt32(31)});
+            default:
+                return Builder.getInt64(16);
+        }
+    };
+
+    auto getDynamicVectorSizeFromType = [&getRuntimeVectorLength](IRBuilder<> &Builder, CallInst* CI, MDNode* OpSigMD) -> Value* {
+        for (unsigned idx = 0; idx < CI->getNumOperands(); ++idx) {
+            Type* ArgTy = CI->getOperand(idx)->getType();
+    
+            if (auto* SVTy = dyn_cast<ScalableVectorType>(ArgTy)) {
+                Value* length = getRuntimeVectorLength(Builder, SVTy->getElementType());
+                if (auto* Inst = dyn_cast<Instruction>(length))
+                    Inst->setMetadata("op_sig", OpSigMD);
+                return length;
+            }
+        }
+
+        for (unsigned idx = 0; idx < CI->getNumOperands(); ++idx) {
+            Type* ArgTy = CI->getOperand(idx)->getType();
+            if (auto* VTy = dyn_cast<FixedVectorType>(ArgTy)) {
+                Value* numElements = Builder.getInt64(VTy->getNumElements());
+                if (auto* Inst = dyn_cast<Instruction>(numElements))
+                    Inst->setMetadata("op_sig", OpSigMD);
+                return numElements;
+            }
+        }
+    
+        Value* Default = Builder.getInt64(4); // Default to 4 elements (ConstantInt, no metadata possible/needed)
+        if (auto* Inst = dyn_cast<Instruction>(Default))
+            Inst->setMetadata("op_sig", OpSigMD);
+        return Default;
     };
 
     unsigned widthMult = getVectorWidthMultiplier(Name);
@@ -32,7 +90,12 @@ unsigned getIntrinsicCostAArch64(StringRef Name)
     bool isHorizontal = Name.contains(".addp") || Name.contains(".saddlp") ||
                         Name.contains(".uaddlp") || Name.contains(".vmaxv") ||
                         Name.contains(".vminv") || Name.contains(".faddv") ||
-                        Name.contains(".fmaxv") || Name.contains(".fminv");
+                        Name.contains(".fmaxv") || Name.contains(".fminv") ||
+                        Name.contains(".uaddv") || Name.contains(".saddv") ||  // Expanded for SVE horizontal/reductions
+                        Name.contains(".umaxv") || Name.contains(".smaxv") ||
+                        Name.contains(".uminv") || Name.contains(".sminv") ||
+                        Name.contains(".fmaxnmv") || Name.contains(".fminnmv") ||
+                        Name.contains(".fadda");
 
     if (Name.starts_with("llvm.arm.neon") || Name.starts_with("llvm.aarch64.neon"))
     {
@@ -467,118 +530,128 @@ unsigned getIntrinsicCostAArch64(StringRef Name)
     // SVE/SVE2 intrinsics (Scalable Vector Extension)
     if (Name.starts_with("llvm.aarch64.sve"))
     {
-        // Basic arithmetic operations
-        if (Name.contains(".add") || Name.contains(".sub"))
-            return 1 * widthMult + typeAdj + (isHorizontal ? widthMult : 0);
+        Value* numElements = getDynamicVectorSizeFromType(Builder, CI, OpSigMD);
+        IntegerType* I64Ty = Builder.getInt64Ty();
+        Value* scaledCost = nullptr;
 
-        if (Name.contains(".mul"))
+        // Determine element type from operands for accurate type adjustment
+        Type* elemType = nullptr;
+        for (unsigned idx = 0; idx < CI->getNumOperands(); ++idx) {
+            Type* argTy = CI->getOperand(idx)->getType();
+            if (auto* svTy = dyn_cast<ScalableVectorType>(argTy)) {
+                elemType = svTy->getElementType();
+                break;
+            }
+        }
+        unsigned elemBits = elemType ? elemType->getPrimitiveSizeInBits() : 32;  // Default to 32-bit
+        bool isFP = elemType && elemType->isFloatingPointTy();
+        bool is64Bit = (elemBits == 64);
+
+        // Compute typeAdj: +2 only for f64 (align to FP-specific, matching x86/NEON)
+        unsigned typeAdj = 1;  // Default
+        if (isFP && is64Bit) typeAdj = 2;  // +2 for f64 only (not i64)
+
+        // Basic arithmetic operations (add, sub, etc.)
+        if (Name.contains(".add") || Name.contains(".sub") || Name.contains(".saddlp") || Name.contains(".uaddlp"))
         {
-            unsigned base = Name.contains(".i64") ? 4 : 3;
-            return base * widthMult + typeAdj;
+            unsigned base = 1;  // Matches Add/Sub in switch
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj + (isHorizontal ? 1 : 0)));  // Minimal horizontal adder
         }
 
-        if (Name.contains(".div"))
+        if (Name.contains(".mul") || Name.contains(".pmul") || Name.contains(".smull") || Name.contains(".umull") || Name.contains(".pmull") || Name.contains(".sqdmulh") || Name.contains(".sqrdmulh"))
         {
-            unsigned base = Name.contains(".f64") ? 20 : (Name.contains(".f32") ? 15 : 25);
-            return base * widthMult + typeAdj;
+            unsigned base = is64Bit ? 4 : 3;  // Matches Mul=3, higher for 64-bit
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
         }
 
-        // Multiply-add operations
-        if (Name.contains(".mla") || Name.contains(".mls") || 
-            Name.contains(".mad") || Name.contains(".msb"))
-            return 4 * widthMult + typeAdj;
+        if (Name.contains(".div") || Name.contains(".sdiv") || Name.contains(".udiv") || Name.contains(".sdivr") || Name.contains(".udivr"))
+        {
+            unsigned base = isFP ? (is64Bit ? 20 : 15) : 15;  // Int=15 (faster), FP=15/20 (slower for double)
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Floating-point multiply-add
-        if (Name.contains(".fmla") || Name.contains(".fmls") ||
-            Name.contains(".fmad") || Name.contains(".fmsb") ||
-            Name.contains(".fnmla") || Name.contains(".fnmls"))
-            return 5 * widthMult + typeAdj;
+        // Multiply-add operations (mla, mls, mad, msb, sqdmlalb, etc.)
+        if (Name.contains(".mla") || Name.contains(".mls") || Name.contains(".mad") || Name.contains(".msb") || Name.contains(".sqdmlalb") || Name.contains(".sqdmlalt") || Name.contains(".sqdmlslb") || Name.contains(".sqdmlslt") || Name.contains(".sqdmlalbt") || Name.contains(".sqdmlslbt"))
+        {
+            unsigned base = 4;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Comparisons
-        if (Name.contains(".cmp") || Name.contains(".cmpeq") ||
-            Name.contains(".cmpne") || Name.contains(".cmpge") ||
-            Name.contains(".cmpgt") || Name.contains(".cmple") ||
-            Name.contains(".cmplt"))
-            return 2 * widthMult + typeAdj;
+        // Floating-point multiply-add (fmla, fmls, etc.)
+        if (Name.contains(".fmla") || Name.contains(".fmls") || Name.contains(".fmad") || Name.contains(".fmsb") || Name.contains(".fnmla") || Name.contains(".fnmls") || Name.contains(".fmlalb") || Name.contains(".fmlalt") || Name.contains(".fmlslb") || Name.contains(".fmlslt"))
+        {
+            unsigned base = 5;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Floating-point comparisons
-        if (Name.contains(".fcmp") || Name.contains(".facge") ||
-            Name.contains(".facgt") || Name.contains(".fcmeq") ||
-            Name.contains(".fcmge") || Name.contains(".fcmgt") ||
-            Name.contains(".fcmle") || Name.contains(".fcmlt") ||
-            Name.contains(".fcmne"))
-            return 3 * widthMult + typeAdj;
+        // Comparisons (cmp, cmpeq, cmpge, etc.; facge, facgt, fcmpeq, etc. for FP)
+        if (Name.contains(".cmp") || Name.contains(".cmpeq") || Name.contains(".cmpne") || Name.contains(".cmpge") || Name.contains(".cmpgt") || Name.contains(".cmphi") || Name.contains(".cmphs") || Name.contains(".cmple") || Name.contains(".cmplt") || Name.contains(".cmplo") || Name.contains(".cmpls") || Name.contains(".cmple_wide") || Name.contains(".cmplo_wide") || Name.contains(".cmpls_wide") || Name.contains(".cmplt_wide") || Name.contains(".cmpne_wide") || Name.contains(".fcmp") || Name.contains(".facge") || Name.contains(".facgt") || Name.contains(".fcmeq") || Name.contains(".fcmge") || Name.contains(".fcmgt") || Name.contains(".fcmle") || Name.contains(".fcmlt") || Name.contains(".fcmne") || Name.contains(".fcmpeq") || Name.contains(".fcmpeq_wide") || Name.contains(".fcmplo_wide") || Name.contains(".fcmpls_wide") || Name.contains(".fcmplt_wide") || Name.contains(".fcmple_wide"))
+        {
+            unsigned base = isFP ? 3 : 1;  // Align to ICmp=1, FCmp=3
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Reductions
-        if (Name.contains(".uaddv") || Name.contains(".saddv") ||
-            Name.contains(".umaxv") || Name.contains(".smaxv") ||
-            Name.contains(".uminv") || Name.contains(".sminv"))
-            return 6 * widthMult + typeAdj + (isHorizontal ? widthMult : 0);
+        // Reductions (uaddv, saddv, faddv, etc.)
+        if (Name.contains(".uaddv") || Name.contains(".saddv") || Name.contains(".umaxv") || Name.contains(".smaxv") || Name.contains(".uminv") || Name.contains(".sminv") || Name.contains(".faddv") || Name.contains(".fmaxv") || Name.contains(".fminv") || Name.contains(".fmaxnmv") || Name.contains(".fminnmv") || Name.contains(".fadda") || Name.contains(".orv") || Name.contains(".eorv") || Name.contains(".andv") || Name.contains(".orqv") || Name.contains(".eorqv") || Name.contains(".andqv") || Name.contains(".addqv") || Name.contains(".smaxqv") || Name.contains(".umaxqv") || Name.contains(".sminqv") || Name.contains(".uminqv"))
+        {
+            unsigned base = isFP ? 8 : 6;  // Approx from .td groupings
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj + (isHorizontal ? 1 : 0)));
+        }
 
-        if (Name.contains(".faddv") || Name.contains(".fmaxv") ||
-            Name.contains(".fminv") || Name.contains(".fmaxnmv") ||
-            Name.contains(".fminnmv"))
-            return 8 * widthMult + typeAdj + (isHorizontal ? widthMult : 0);
+        // Bitwise operations (and, orr, eor, bic, orn, eor3, bcax, bsl, nbsl, etc.)
+        if (Name.contains(".and") || Name.contains(".orr") || Name.contains(".eor") || Name.contains(".bic") || Name.contains(".orn") || Name.contains(".eor3") || Name.contains(".bcax") || Name.contains(".bsl") || Name.contains(".nbsl") || Name.contains(".and_z") || Name.contains(".bic_z") || Name.contains(".eor_z") || Name.contains(".orr_z") || Name.contains(".nand_z") || Name.contains(".nor_z") || Name.contains(".orn_z"))
+        {
+            unsigned base = 1;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        if (Name.contains(".fadda"))
-            return 10 * widthMult + typeAdj + (isHorizontal ? widthMult : 0);
+        // Shifts (asr, lsl, lsr, xar, etc.)
+        if (Name.contains(".lsl") || Name.contains(".lsr") || Name.contains(".asr") || Name.contains(".xar") || Name.contains(".asrd") || Name.contains(".srshr") || Name.contains(".urshr") || Name.contains(".srsra") || Name.contains(".ursra") || Name.contains(".ssra") || Name.contains(".usra") || Name.contains(".srshl") || Name.contains(".urshl") || Name.contains(".sqrshl") || Name.contains(".uqrshl") || Name.contains("srshl_single") || Name.contains("urshl_single"))
+        {
+            unsigned base = 1;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Bitwise operations
-        if (Name.contains(".and") || Name.contains(".orr") || 
-            Name.contains(".eor") || Name.contains(".bic") ||
-            Name.contains(".orn"))
-            return 1 * widthMult;
+        // Absolute value and negation (abs, neg, sqabs, sqneg, etc.)
+        if (Name.contains(".abs") || Name.contains(".neg") || Name.contains(".fabs") || Name.contains(".fneg") || Name.contains(".sqabs") || Name.contains(".sqneg") || Name.contains(".cnot"))
+        {
+            unsigned base = 1;  // Align to FNeg=1
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Shifts
-        if (Name.contains(".lsl") || Name.contains(".lsr") || 
-            Name.contains(".asr"))
-            return 2 * widthMult + typeAdj;
+        // Min/max operations (smax, smin, umax, umin, fmax, fmin, etc.)
+        if (Name.contains(".smax") || Name.contains(".smin") || Name.contains(".umax") || Name.contains(".umin") || Name.contains(".fmax") || Name.contains(".fmin") || Name.contains(".fmaxnm") || Name.contains(".fminnm") || Name.contains(".smaxp") || Name.contains(".sminp") || Name.contains(".umaxp") || Name.contains(".uminp") || Name.contains(".smaxqv") || Name.contains(".umaxqv") || Name.contains(".sminqv") || Name.contains(".uminqv") || Name.contains(".fmaxp") || Name.contains(".fminp") || Name.contains(".fmaxnmp") || Name.contains(".fminnmp"))
+        {
+            unsigned base = isFP ? 3 : 2;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Absolute value and negation
-        if (Name.contains(".abs") || Name.contains(".neg"))
-            return 1 * widthMult + typeAdj;
+        // Saturating arithmetic (qadd, qsub, sqadd, sqsub, uqadd, uqsub, sqdech, sqdecw, etc.)
+        if (Name.contains(".qadd") || Name.contains(".qsub") || Name.contains(".sqadd") || Name.contains(".sqsub") || Name.contains(".uqadd") || Name.contains(".uqsub") || Name.contains(".sqdech") || Name.contains(".sqdecw") || Name.contains(".sqdecd") || Name.contains(".sqdecp") || Name.contains(".sqinch") || Name.contains(".sqincw") || Name.contains(".sqincd") || Name.contains(".sqincp") || Name.contains(".uqdech") || Name.contains(".uqdecw") || Name.contains(".uqdecd") || Name.contains(".uqdecp") || Name.contains(".uqinch") || Name.contains(".uqincw") || Name.contains(".uqincd") || Name.contains(".uqincp") || Name.contains(".sqcvt") || Name.contains(".uqcvt") || Name.contains(".sqcvtu") || Name.contains(".sqcvtn") || Name.contains(".uqcvtn") || Name.contains(".sqcvtun") || Name.contains(".sqcvtu_x2") || Name.contains(".sqcvtu_x4") || Name.contains(".sqcvt_x2") || Name.contains(".sqcvt_x4") || Name.contains(".uqcvt_x2") || Name.contains(".uqcvt_x4") || Name.contains(".sqcvt_x2") || Name.contains(".sqcvt_x4") || Name.contains(".uqcvt_x2") || Name.contains(".uqcvt_x4") || Name.contains(".sqcvtn_x2") || Name.contains(".sqcvtn_x4") || Name.contains(".uqcvtn_x2") || Name.contains(".uqcvtn_x4") || Name.contains(".sqcvtun_x2") || Name.contains(".sqcvtun_x4"))
+        {
+            unsigned base = 3;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        if (Name.contains(".fabs") || Name.contains(".fneg"))
-            return 1 * widthMult + typeAdj;
+        // Conversions (fcvt, scvtf, ucvtf, fcvtzs, fcvtzu, scvtf, ucvtf, sxtb, uxtb, etc.)
+        if (Name.contains(".fcvt") || Name.contains(".scvtf") || Name.contains(".ucvtf") || Name.contains(".fcvtzs") || Name.contains(".fcvtzu") || Name.contains(".sxtb") || Name.contains(".sxth") || Name.contains(".sxtw") || Name.contains(".uxtb") || Name.contains(".uxth") || Name.contains(".uxtw") || Name.contains(".fcvtl") || Name.contains(".fcvtn") || Name.contains(".bfcvtn") || Name.contains(".fcvtx") || Name.contains(".fcvtxnt") || Name.contains(".fcvtnt") || Name.contains(".fcvtlt") || Name.contains(".fcvt_bf16f32") || Name.contains(".fcvtnt_bf16f32") || Name.contains(".fcvt_f16f32") || Name.contains(".fcvt_f16f64") || Name.contains(".fcvt_f32f64") || Name.contains(".fcvt_f32f16") || Name.contains(".fcvt_f64f16") || Name.contains(".fcvt_f64f32"))
+        {
+            unsigned base = 4;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Min/max operations
-        if (Name.contains(".smax") || Name.contains(".smin") ||
-            Name.contains(".umax") || Name.contains(".umin"))
-            return 2 * widthMult + typeAdj;
-
-        if (Name.contains(".fmax") || Name.contains(".fmin") ||
-            Name.contains(".fmaxnm") || Name.contains(".fminnm"))
-            return 3 * widthMult + typeAdj;
-
-        // Saturating arithmetic
-        if (Name.contains(".qadd") || Name.contains(".qsub") ||
-            Name.contains(".sqadd") || Name.contains(".sqsub") ||
-            Name.contains(".uqadd") || Name.contains(".uqsub"))
-            return 3 * widthMult + typeAdj;
-
-        // Conversions
-        if (Name.contains(".fcvt") || Name.contains(".scvtf") ||
-            Name.contains(".ucvtf"))
-            return 4 * widthMult + typeAdj;
-
-        // Sign/zero extension
-        if (Name.contains(".sxtb") || Name.contains(".sxth") ||
-            Name.contains(".sxtw") || Name.contains(".uxtb") ||
-            Name.contains(".uxth") || Name.contains(".uxtw"))
-            return 2 * widthMult + typeAdj;
-
-        // Predicate operations
+        // Predicate operations (fixed cost, not scaled)
         if (Name.contains(".ptrue"))
             return 1;
         if (Name.contains(".pfalse"))
             return 0;  // Can be optimized away
 
-        if (Name.contains(".punpklo") || Name.contains(".punpkhi"))
+        if (Name.contains(".punpklo") || Name.contains(".punpkhi") || Name.contains(".punpkhi") || Name.contains(".punpklo") || Name.contains(".sunpkhi") || Name.contains(".sunpklo") || Name.contains(".uunpkhi") || Name.contains(".uunpklo"))
             return 2;
 
         if (Name.contains(".brka") || Name.contains(".brkb") ||
             Name.contains(".brkn") || Name.contains(".brkpa") ||
-            Name.contains(".brkpb"))
+            Name.contains(".brkpb") || Name.contains(".brka_z") || Name.contains(".brkb_z") || Name.contains(".brkn_z"))
             return 3;
 
         if (Name.contains(".pfirst") || Name.contains(".pnext"))
@@ -588,196 +661,188 @@ unsigned getIntrinsicCostAArch64(StringRef Name)
             return 2;
 
         if (Name.contains(".cntp"))
+        {
+            // cntp counts active elements, fixed low cost (not scaled per-element)
             return 3;
+        }
 
-        // While loop operations
+        if (Name.contains(".ptest_any") || Name.contains(".ptest_first") || Name.contains(".ptest_last"))
+            return 2;
+
+        // While loop operations (fixed cost)
         if (Name.contains(".whilele") || Name.contains(".whilelo") ||
             Name.contains(".whilels") || Name.contains(".whilelt") ||
             Name.contains(".whilege") || Name.contains(".whilegt") ||
-            Name.contains(".whilehs") || Name.contains(".whilehi"))
+            Name.contains(".whilehs") || Name.contains(".whilehi") || Name.contains(".whilerw") || Name.contains(".whilewr"))
             return 3;
 
-        if (Name.contains(".ld1rq") || Name.contains(".ld1rw"))
-            return 4 + (widthMult / 2);
-
-        // Memory operations
-        if (Name.contains(".ld1") || Name.contains(".ldff1"))
+        // Memory operations (ld1, ld2, ld3, ld4, st1, st2, st3, st4, ldnt1, ldnf1, ldff1, ld1rq, ld1ro, stnt1, etc.)
+        if (Name.contains(".ld1") || Name.contains(".ldff1") || Name.contains(".ldnt1") || Name.contains(".ldnf1") || Name.contains(".ld1rq") || Name.contains(".ld1ro") || Name.contains(".ld2") || Name.contains(".ld3") || Name.contains(".ld4") || Name.contains(".ld1_gather") || Name.contains(".ldff1_gather") || Name.contains(". losphericnt1_gather") || Name.contains(".ld1_gather_index") || Name.contains(".ldff1_gather_index") || Name.contains(".ld1_gather_sxtw") || Name.contains(".ld1_gather_uxtw") || Name.contains(".ldff1_gather_sxtw") || Name.contains(".ldff1_gather_uxtw") || Name.contains(".ld1_gather_sxtw_index displacement") || Name.contains(".ld1_gather_uxtw_index") || Name.contains(".ldff1_gather_sxtw_index") || Name.contains(".ldff1_gather_uxtw_index") || Name.contains(".ld1_gather_scalar_offset") || Name.contains(".ldff1_gather_scalar_offset") || Name.contains(".ldnt1_gather_scalar_offset") || Name.contains(".ld1q_gather") || Name.contains(".ld1q_gather_scalar_offset") || Name.contains(".ld1q_gather_index") || Name.contains(".ld1q_gather_vector_offset") || Name.contains(".ld2q_sret") || Name.contains(".ld3q_sret") || Name.contains(".ld4q_sret") || Name.contains(".ld1uwq") || Name.contains(".ld1udq") || Name.contains(".ld1_pn_x2") || Name.contains(".ld1_pn_x4") || Name.contains(".ldnt1_pn_x2") || Name.contains(".ldnt1_pn_x4") || Name.contains(".luti2_lane_zt") || Name.contains(".luti4_lane_zt") || Name.contains(".luti2_lane_zt_x2") || Name.contains(".luti4_lane_zt_x2") || Name.contains(".luti2_lane_zt_x4") || Name.contains(".luti4_lane_zt_x4"))
         {
-            if (Name.contains(".gather"))
-                return 12 + (widthMult / 2);  // Gather loads are expensive
-            return 4 + (widthMult / 2);
+            unsigned base = Name.contains(".gather") || Name.contains(".ldff1") || Name.contains(".ldnf1") ? 5 : 3;  // Base 3 like Load, higher for complex
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
         }
 
-        if (Name.contains(".st1"))
+        if (Name.contains(".st1") || Name.contains(".stnt1") || Name.contains(".st2") || Name.contains(".st3") || Name.contains(".st4") || Name.contains(".st1_scatter") || Name.contains(".stnt1_scatter") || Name.contains(".st1_scatter_index") || Name.contains(".st1_scatter_sxtw") || Name.contains(".st1_scatter_uxtw") || Name.contains(".st1_scatter_sxtw_index") || Name.contains(".st1_scatter_uxtw_index") || Name.contains(".st1_scatter_scalar_offset") || Name.contains(".stnt1_scatter_scalar_offset") || Name.contains(".st1q_scatter") || Name.contains(".st1q_scatter_scalar_offset") || Name.contains(".st1q_scatter_index") || Name.contains(".st1q_scatter_vector_offset") || Name.contains(".st2q") || Name.contains(".st3q") || Name.contains(".st4q") || Name.contains(".st1wq") || Name.contains(".st1dq") || Name.contains(".st1_pn_x2") || Name.contains(".st1_pn_x4") || Name.contains(".stnt1_pn_x2") || Name.contains(".stnt1_pn_x4"))
         {
-            if (Name.contains(".scatter"))
-                return 10 + (widthMult / 2);  // Scatter stores are expensive
-            return 3 + (widthMult / 2);
+            unsigned base = Name.contains(".scatter") ? 10 : 3;  // Base 3 like Store
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
         }
 
-        // Non-temporal loads/stores
+        // Non-temporal loads/stores (already covered in loads/stores, but explicit if needed)
         if (Name.contains(".ldnt1") || Name.contains(".stnt1"))
-            return 2 + (widthMult / 2);
+        {
+            unsigned base = 2;  // Lower base
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Structure loads/stores (2/3/4 element)
+        // Structure loads/stores (ld2, ld3, ld4, st2, st3, st4; scale with multiples)
         if (Name.contains(".ld2"))
-            return 8 + (widthMult / 2);
+        {
+            unsigned base = 6;  // Approx 2x load
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
         if (Name.contains(".ld3"))
-            return 10 + (widthMult / 2);
+        {
+            unsigned base = 9;  // Approx 3x
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
         if (Name.contains(".ld4"))
-            return 12 + (widthMult / 2);
+        {
+            unsigned base = 12;  // Approx 4x
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
         if (Name.contains(".st2"))
-            return 6 + (widthMult / 2);
+        {
+            unsigned base = 6;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
         if (Name.contains(".st3"))
-            return 8 + (widthMult / 2);
+        {
+            unsigned base = 9;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
         if (Name.contains(".st4"))
-            return 10 + (widthMult / 2);
+        {
+            unsigned base = 12;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Contiguous first-faulting loads
-        if (Name.contains(".ldff1"))
-            return 5 + (widthMult / 2);
+        // Permutations and shuffles (rev, trn1, uzp1, zip1, tbl, tbx, compact, splice, lasta, lastb, ext, dup, etc.)
+        if (Name.contains(".rev") || Name.contains(".revb") || Name.contains(".revh") || Name.contains(".revw") || Name.contains(".revd") || Name.contains(".trn1") || Name.contains(".trn2") || Name.contains(".uzp1") || Name.contains(".uzp2") || Name.contains(".zip1") || Name.contains(".zip2") || Name.contains(".tbl") || Name.contains(".tbx") || Name.contains(".compact") || Name.contains(".splice") || Name.contains(".lastb") || Name.contains(".lasta") || Name.contains(".ext") || Name.contains(".dup") || Name.contains(".dupq") || Name.contains(".extq") || Name.contains(".tblq") || Name.contains(".tbxq") || Name.contains(".trn1q") || Name.contains(".trn2q") || Name.contains(".uzp1q") || Name.contains(".uzp2q") || Name.contains(".zip1q") || Name.contains(".zip2q") || Name.contains(".zipq1") || Name.contains(".zipq2") || Name.contains(".uzpq1") || Name.contains(".uzpq2") || Name.contains(".trn1_b16") || Name.contains(".trn1_b32") || Name.contains(".trn1_b64") || Name.contains(".trn2_b16") || Name.contains(".trn2_b32") || Name.contains(".trn2_b64") || Name.contains(".uzp1_b16") || Name.contains(".uzp1_b32") || Name.contains(".uzp1_b64") || Name.contains(".uzp2_b16") || Name.contains(".uzp2_b32") || Name.contains(".uzp2_b64") || Name.contains(".zip1_b16") || Name.contains(".zip1_b32") || Name.contains(".zip1_b64") || Name.contains(".zip2_b16") || Name.contains(".zip2_b32") || Name.contains(".zip2_b64") || Name.contains(".zip_x2") || Name.contains(".zipq_x2") || Name.contains(".zip_x4") || Name.contains(".zipq_x4") || Name.contains(".uzp_x2") || Name.contains(".uzpq_x2") || Name.contains(".uzp_x4") || Name.contains(".uzpq_x4") || Name.contains(".tbl2") || Name.contains(".tbx2") || Name.contains(".extq"))
+        {
+            unsigned base = 3;  // Align to ShuffleVector=3 / ExtractElement=3
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Permutations and shuffles
-        if (Name.contains(".rev") || Name.contains(".revb") ||
-            Name.contains(".revh") || Name.contains(".revw"))
-            return 2 * widthMult + typeAdj;
-
-        if (Name.contains(".trn1") || Name.contains(".trn2") ||
-            Name.contains(".uzp1") || Name.contains(".uzp2") ||
-            Name.contains(".zip1") || Name.contains(".zip2"))
-            return 3 * widthMult + typeAdj;
-
-        if (Name.contains(".tbl") || Name.contains(".tbx"))
-            return 4 * widthMult + typeAdj;
-
-        if (Name.contains(".compact"))
-            return 5 * widthMult + typeAdj;
-
-        if (Name.contains(".splice"))
-            return 3 * widthMult + typeAdj;
-
-        if (Name.contains(".lastb") || Name.contains(".lasta"))
-            return 3 * widthMult + typeAdj;
-
-        // Extract operations
-        if (Name.contains(".ext"))
-            return 2 * widthMult + typeAdj;
-
-        if (Name.contains(".dupq") || Name.contains(".dup"))
-            return 2 * widthMult + typeAdj;
-
-        // Index generation
+        // Index generation (index)
         if (Name.contains(".index"))
-            return 1 * widthMult + typeAdj;
+        {
+            unsigned base = 1;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // SVE2 specific operations
-        if (Name.contains(".sqdmulh") || Name.contains(".sqrdmulh"))
-            return 5 * widthMult + typeAdj;
+        // SVE2 specific operations (sqdmulh, sqrdmulh, sqdmlalb, etc.)
 
-        if (Name.contains(".sqdmlalb") || Name.contains(".sqdmlalt") ||
-            Name.contains(".sqdmlslb") || Name.contains(".sqdmlslt"))
-            return 6 * widthMult + typeAdj;
+    if (Name.contains(".sqdmulh") || Name.contains(".sqrdmulh") || Name.contains(".sqdmullb") || Name.contains(".sqdmullt") || Name.contains(".sabalb") || Name.contains(".sabalt") ||
+            Name.contains(".uabalb") || Name.contains(".uabalt") || Name.contains(".saddlb") || Name.contains(".saddlt") || Name.contains(".uaddlb") || Name.contains(".uaddlt") ||
+            Name.contains(".ssublb") || Name.contains(".ssublt") || Name.contains(".usublb") || Name.contains(".usublt") || Name.contains(".sabdlb") || Name.contains(".sabdlt") ||
+            Name.contains(".uabdlb") || Name.contains(".uabdlt") || Name.contains(".smullb") || Name.contains(".smullt") || Name.contains(".umullb") || Name.contains(".umullt") ||
+            Name.contains(".pmullb") || Name.contains(".pmullt") || Name.contains(".pmullb_pair") || Name.contains(".pmullt_pair") || Name.contains(".eorbt") || Name.contains(".eortb") ||
+            Name.contains(".bdep") || Name.contains(".bext") || Name.contains(".bgrp") || Name.contains(".cadd") || Name.contains(".sqcadd") || Name.contains(".cmla") || Name.contains(".sqrdcmlah") ||
+            Name.contains(".histcnt") || Name.contains(".histseg") || Name.contains(".match") || Name.contains(".nmatch") || Name.contains(".eor3") || Name.contains(".bcax") || 
+            Name.contains(".bsl") || Name.contains(".nbsl") || Name.contains(".xar") || Name.contains(".fmlalb") || Name.contains(".fmlalt") || Name.contains(".fmlslb") || Name.contains(".fmlslt") ||
+            Name.contains(".addp") || Name.contains(".faddp") || Name.contains(".fmaxp") || Name.contains(".fmaxnmp") || Name.contains(".fminp") || Name.contains(".fminnmp") ||
+            Name.contains(".smaxp") || Name.contains(".sminp") || Name.contains(".umaxp") || Name.contains(".uminp") || Name.contains(".sadalp") || Name.contains(".uadalp") ||
+            Name.contains(".saddlbt") || Name.contains(".ssublbt") || Name.contains(".ssubltb") || Name.contains(".cdot") ||
+            Name.contains(".shadd") || Name.contains(".shsub") || Name.contains(".shsubr") || Name.contains(".sli") || Name.contains(".sqabs") ||
+            Name.contains(".sqadd") || Name.contains(".sqdmulh") || Name.contains(".sqneg") || Name.contains(".sqrdmlah") || Name.contains(".sqrdmlsh") ||
+            Name.contains(".sqrdmulh") || Name.contains(".sqrshl") || Name.contains(".sqshl") || Name.contains(".sqshlu") || Name.contains(".sqsub") ||
+            Name.contains(".sqsubr") || Name.contains(".srhadd") || Name.contains(".sri") || Name.contains(".srshl") || Name.contains(".srshr") ||
+            Name.contains(".srsra") || Name.contains(".ssra") || Name.contains(".suqadd") || Name.contains(".uaba") || Name.contains(".uhadd") ||
+            Name.contains(".uhsub") || Name.contains(".uhsubr") || Name.contains(".uqadd") || Name.contains(".uqrshl") || Name.contains(".uqshl") ||
+            Name.contains(".uqsub") || Name.contains(".uqsubr") || Name.contains(".urecpe") || Name.contains(".urhadd") || Name.contains(".urshl") ||
+            Name.contains(".urshr") || Name.contains(".ursqrte") || Name.contains(".ursra") || Name.contains(".usqadd") || Name.contains(".usra"))
+        {
+            unsigned base = Name.contains(".mul") || Name.contains(".qdmulh") || Name.contains(".qdmlal") || Name.contains(".qdmlsl") || Name.contains(".qdmull") || Name.contains(".qrdmulh") || Name.contains(".qrdmlah") || Name.contains(".qrdmlsh") || Name.contains(".mull") ? 3 : (Name.contains(".add") || Name.contains(".sub") || Name.contains(".abd") || Name.contains(".adcl") || Name.contains(".sbcl") ? 1 : (Name.contains(".shl") || Name.contains(".shr") || Name.contains(".sra") ? 1 : (Name.contains(".hist") || Name.contains(".match") ? 8 : 2)));  // Adjust bases based on op type
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        if (Name.contains(".saddlb") || Name.contains(".saddlt") ||
-            Name.contains(".uaddlb") || Name.contains(".uaddlt") ||
-            Name.contains(".ssublb") || Name.contains(".ssublt") ||
-            Name.contains(".usublb") || Name.contains(".usublt"))
-            return 3 * widthMult + typeAdj;
-
-        if (Name.contains(".sabdlb") || Name.contains(".sabdlt") ||
-            Name.contains(".uabdlb") || Name.contains(".uabdlt"))
-            return 4 * widthMult + typeAdj;
-
-        if (Name.contains(".smullb") || Name.contains(".smullt") ||
-            Name.contains(".umullb") || Name.contains(".umullt"))
-            return 4 * widthMult + typeAdj;
-
-        if (Name.contains(".sqdmullb") || Name.contains(".sqdmullt"))
-            return 5 * widthMult + typeAdj;
-
-        // Polynomial multiply
-        if (Name.contains(".pmullb") || Name.contains(".pmullt"))
-            return 5 * widthMult + typeAdj;
-
-        // Bit manipulation (SVE2)
-        if (Name.contains(".bdep") || Name.contains(".bext") ||
-            Name.contains(".bgrp"))
-            return 3 * widthMult + typeAdj;
-
-        // Complex arithmetic (SVE2)
-        if (Name.contains(".cadd") || Name.contains(".sqcadd"))
-            return 4 * widthMult + typeAdj;
-
-        if (Name.contains(".cmla") || Name.contains(".sqrdcmlah"))
-            return 6 * widthMult + typeAdj;
-
-        // Histogram operations (SVE2)
-        if (Name.contains(".histcnt") || Name.contains(".histseg"))
-            return 8 * widthMult + typeAdj;
-
-        // Match operations (SVE2)
-        if (Name.contains(".match") || Name.contains(".nmatch"))
-            return 5 * widthMult + typeAdj;
-
-        // Floating-point special operations
+        // Floating-point special operations (frint, fsqrt, frecpe, frsqrte, fexpa, ftsmul, etc.)
         if (Name.contains(".frintn") || Name.contains(".frintp") ||
             Name.contains(".frintm") || Name.contains(".frinta") ||
             Name.contains(".frintx") || Name.contains(".frinti") ||
-            Name.contains(".frintz"))
-            return 4 * widthMult + typeAdj;
+            Name.contains(".frintz") || Name.contains(".frint") || Name.contains(".frecpe") || Name.contains(".frecps") ||
+            Name.contains(".frecpx") || Name.contains(".frsqrte") || Name.contains(".frsqrts") ||
+            Name.contains(".fexpa") || Name.contains(".ftsmul") || Name.contains(".ftssel") ||
+            Name.contains(".ftmad") || Name.contains(".fsqrt"))
+        {
+            unsigned base = Name.contains(".fsqrt") ? 20 : (Name.contains(".ftsmul") || Name.contains(".frsqrte") || Name.contains(".frmad") ? 6 : 4);
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        if (Name.contains(".fsqrt"))
-            return 20 * widthMult + typeAdj;
+        // Count operations (cnt, clz, cls, ctz, cntb, cnth, cntw, cntd, cntp, cntsb, cntsh, cntsw, cntsd)
+        if (Name.contains(".cnt") || Name.contains(".clz") || Name.contains(".cls") || Name.contains(".ctz") || Name.contains(".cntb") || Name.contains(".cnth") || Name.contains(".cntw") || Name.contains(".cntd") || Name.contains(".cntp") || Name.contains(".cntsb") || Name.contains(".cntsh") || Name.contains(".cntsw") || Name.contains(".cntsd"))
+        {
+            unsigned base = 3;  // Align to ctpop=3
+            if (Name.contains(".cntp") || Name.contains(".cntsb") || Name.contains(".cntsh") || Name.contains(".cntsw") || Name.contains(".cntsd")) {
+                // Fixed cost for these
+                return 3;
+            } else {
+                scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+            }
+        }
 
-        if (Name.contains(".frecpe") || Name.contains(".frecps") ||
-            Name.contains(".frecpx"))
-            return 5 * widthMult + typeAdj;
+        // Bit reversal (rbit, revd)
+        if (Name.contains(".rbit") || Name.contains(".revd"))
+        {
+            unsigned base = 1;  // Align to bitwise=1
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        if (Name.contains(".frsqrte") || Name.contains(".frsqrts"))
-            return 6 * widthMult + typeAdj;
+        // First Fault Register (FFR) operations (rdffr, wrffr, setffr)
+        if (Name.contains(".rdffr") || Name.contains(".wrffr") || Name.contains(".setffr"))
+        {
+            unsigned base = 1;  // Low like basic ops
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Exponential and trig approximations (if supported)
-        if (Name.contains(".fexpa"))
-            return 8 * widthMult + typeAdj;
+        if (Name.contains(".sel") || Name.contains(".sel_x2") || Name.contains(".sel_x4") || Name.contains(".pmov_to_pred_lane") || Name.contains(".pmov_to_pred_lane_zero") || Name.contains(".pmov_to_vector_lane_merging") || Name.contains(".pmov_to_vector_lane_zeroing"))
+        {
+            unsigned base = 2;  // Align to Select=2
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        if (Name.contains(".ftsmul") || Name.contains(".ftssel") ||
-            Name.contains(".ftmad"))
-            return 6 * widthMult;
+        // Default for any unhandled SVE intrinsic (scale linearly with default base=4 like FMul approx)
+        if (!scaledCost)
+        {
+            unsigned base = 4;
+            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + typeAdj));
+        }
 
-        // Count operations
-        if (Name.contains(".cnt"))
-            return 2 * widthMult + typeAdj;
-
-        if (Name.contains(".clz") || Name.contains(".cls"))
-            return 3 * widthMult + typeAdj;
-
-        if (Name.contains(".ctz"))
-            return 3 * widthMult + typeAdj;
-
-        // Bit reversal
-        if (Name.contains(".rbit"))
-            return 2 * widthMult + typeAdj;
-
-        // First Fault Register (FFR) operations
-        if (Name.contains(".rdffr") || Name.contains(".wrffr") ||
-            Name.contains(".setffr"))
-            return 2 * widthMult + typeAdj;
-
-        if (Name.contains(".sel"))
-            return 2 * widthMult + typeAdj;
-
-        if (Name.contains(".rbit") || Name.contains(".clz") || Name.contains(".cls")) return 3 * widthMult + typeAdj;  // Bit counts (efficient in SVE2)
-        if (Name.contains(".ctz")) return 4 * widthMult + typeAdj;  // Slightly higher
-        if (Name.contains(".histcnt") || Name.contains(".histseg")) return 8 * widthMult + typeAdj;  // Histogram (specialized, keep high)
-        if (Name.contains(".match") || Name.contains(".nmatch")) return 5 * widthMult + typeAdj;  // Pattern matching
-        if (Name.contains(".pmullb") || Name.contains(".pmullt")) return 5 * widthMult + typeAdj;  // Polynomial multiply
-        if (Name.contains(".bdep") || Name.contains(".bext") || Name.contains(".bgrp")) return 3 * widthMult + typeAdj;  // Bit manipulation
-        if (Name.contains(".cadd") || Name.contains(".sqcadd")) return 4 * widthMult + typeAdj;  // Complex add
-        if (Name.contains(".cmla") || Name.contains(".sqrdcmlah")) return 6 * widthMult + typeAdj;  // Complex multiply-accumulate
-
-        // Default for any unhandled SVE intrinsic
-        return 4 * widthMult + typeAdj;
+        // Attach metadata to scaledCost once, if it's an instruction
+        if (auto* Inst = dyn_cast<Instruction>(scaledCost))
+            Inst->setMetadata("op_sig", OpSigMD);
+    
+        // Insert dynamic cost addition to fuel counter
+        Module *M = CI->getModule();
+        LLVMContext &Context = M->getContext();
+        GlobalVariable *ThreadLocalFuelGlobal = cast<GlobalVariable>(M->getOrInsertGlobal("__thread_local_fuel_used", I64Ty));
+        ThreadLocalFuelGlobal->setLinkage(GlobalValue::ExternalLinkage);
+        ThreadLocalFuelGlobal->setThreadLocal(true);
+    
+        LoadInst *CurrentFuel = Builder.CreateLoad(I64Ty, ThreadLocalFuelGlobal);
+        CurrentFuel->setMetadata("op_sig", OpSigMD);
+    
+        Value *NewFuel = Builder.CreateAdd(CurrentFuel, scaledCost);
+        if (auto *Inst = dyn_cast<Instruction>(NewFuel))
+            Inst->setMetadata("op_sig", OpSigMD);
+    
+        StoreInst *StoreFuel = Builder.CreateStore(NewFuel, ThreadLocalFuelGlobal);
+        StoreFuel->setMetadata("op_sig", OpSigMD);
+    
+        return 0;  // Static cost handled dynamically
     }
 
     if (Name.starts_with("llvm.aarch64.sme")) return 7 * widthMult + typeAdj;  // Matrix extensions ~ SVE
@@ -1552,14 +1617,14 @@ unsigned getFuelCostAArch64(Instruction &I)
 
             if (Callee->isIntrinsic())
             {
+                IRBuilder<> Builder(Call); 
                 StringRef Name = Callee->getName();       
                 if (Name.starts_with("llvm.memcpy") || Name.starts_with("llvm.memmove") || Name.starts_with("llvm.memset") || Name.starts_with("llvm.memcmp"))
                 {
-                    IRBuilder<> Builder(Call); 
                     return getMemoryIntrinsicCostAArch64(Call, Name, Builder, OpSigMD);
                 }
 
-                if (unsigned cost = getIntrinsicCostAArch64(Callee->getName()))
+                if (unsigned cost = getIntrinsicCostAArch64(Callee->getName(), Builder, Call, OpSigMD))
                     return cost;
 
                 if (unsigned cost = getGenericIntrinsicCostAArch64(Callee->getName()))
