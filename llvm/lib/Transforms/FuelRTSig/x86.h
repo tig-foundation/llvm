@@ -1,20 +1,20 @@
 unsigned getIntrinsicCostX86(StringRef Name)
 {
-    // Softened helpers
+    // Softened helpers (aligned with AArch64 for consistency; widthMult caps AVX512 at 3 to match SVE scalable without overcosting)
     auto getVectorWidthMultiplier = [](StringRef Name) -> unsigned {
-        if (Name.contains("avx512")) return 3;  // Soft premium for 512-bit
-        if (Name.contains("avx")) return 2;     // Same as SSE (uop splitting)
-        return 2;                               // SSE
+        if (Name.contains("avx512")) return 3;  // Soft premium for 512-bit (uop splitting, thermal limits)
+        if (Name.contains("avx")) return 2;     // Same as SSE (moderate decode overhead)
+        return 2;                               // SSE/default (aligned to AArch64 NEON=2)
     };
 
-    auto getDataTypeAdjustment = [](StringRef Name) -> unsigned {  // Additive, not mult
+    auto getDataTypeAdjustment = [](StringRef Name) -> unsigned {  // Additive, not mult; +2 only for FP64 (align to AArch64 f64=2, not i64)
         if (Name.contains(".pd") || Name.ends_with("f64")) return 2;  // +2 for FP64
         if (Name.contains(".ps") || Name.ends_with("f32")) return 1;  // +1 for FP32
         if (Name.ends_with("i64") || Name.contains("q")) return 1;
         if (Name.ends_with("i32") || Name.contains("d")) return 1;
         if (Name.ends_with("i16") || Name.contains("w")) return 1;
         if (Name.ends_with("i8") || Name.contains("b")) return 1;
-        return 1;  // Default +1
+        return 1;  // Default +1 (aligned to AArch64)
     };
 
     auto isElementSensitive = [](StringRef Name) -> bool {
@@ -31,22 +31,21 @@ unsigned getIntrinsicCostX86(StringRef Name)
     bool isHorizontal = Name.contains(".hadd") || Name.contains(".hsub") ||
                         Name.contains(".sad") || Name.contains(".reduce");
 
-    // SSE intrinsics (adjusted)
     if (Name.starts_with("llvm.x86.sse")) {
         if (Name.contains(".add") || Name.contains(".sub")) {
-            unsigned base = 1;
+            unsigned base = 1;  // Matches Add/Sub=1
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".mul")) {
-            unsigned base = 3;
+            unsigned base = 3;  // Matches Mul=3
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".div")) {
-            unsigned base = 15;
+            unsigned base = 15;  // Matches FDiv/UDiv avg=15-17
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".sqrt")) {
-            unsigned base = 15;
+            unsigned base = 15;  // High like custom sqrt=15
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
 
@@ -54,24 +53,24 @@ unsigned getIntrinsicCostX86(StringRef Name)
             Name.contains(".comige") || Name.contains(".comigt") ||
             Name.contains(".comile") || Name.contains(".comilt") ||
             Name.contains(".comineq")) {
-            unsigned base = 1;
+            unsigned base = 1;  // Matches ICmp/FCmp avg=1-3
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
 
         if (Name.contains(".and") || Name.contains(".or") || 
             Name.contains(".xor") || Name.contains(".andnot"))
-            return 1 * widthMult;  // Low cost for bitwise
+            return 1 * widthMult;  // Matches And/Or/Xor=1
 
         if (Name.contains(".shuf") || Name.contains(".pshufd") ||
             Name.contains(".pshufb") || Name.contains(".pshufw"))
-            return 1 * widthMult;  // Low for shuffles
+            return 3 * widthMult;  // Matches ShuffleVector=3
         if (Name.contains(".unpack"))
-            return 1 * widthMult;
+            return 3 * widthMult;  // Matches ShuffleVector=3
         if (Name.contains(".movmsk"))
-            return 2;  // Matches AArch64 extract=2
+            return 3;  // Matches ExtractElement=3
 
         if (Name.contains(".cvt")) {
-            unsigned base = 2;
+            unsigned base = 3;  // Matches custom convert=3
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
         if (Name.contains(".cvtsi2ss") || Name.contains(".cvtsi2sd"))
@@ -80,37 +79,37 @@ unsigned getIntrinsicCostX86(StringRef Name)
             return 3;
 
         if (Name.contains(".min") || Name.contains(".max")) {
-            unsigned base = 1;
+            unsigned base = 2;  // Matches custom min/max=2
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
 
         if (Name.contains(".loadu") || Name.contains(".load"))
-            return 3 + (widthMult / 2);  // Softened
+            return 2 + (widthMult / 2);  // Matches Load=2
         if (Name.contains(".storeu") || Name.contains(".store"))
-            return 4 + (widthMult / 2);
+            return 2 + (widthMult / 2);  // Matches Store=2
         if (Name.contains(".movnt"))
-            return 1;  // Non-temporal store
+            return 2;  // Non-temporal store like Store=2
 
         if (Name.contains("sse2")) {
             if (Name.contains(".padd") || Name.contains(".psub")) {
-                unsigned base = 1;
+                unsigned base = 1;  // Matches Add/Sub=1
                 return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
             }
             if (Name.contains(".pmul")) {
-                unsigned base = 2;
+                unsigned base = 3;  // Matches Mul=3
                 return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
             }
             if (Name.contains(".pcmp")) {
-                unsigned base = 1;
+                unsigned base = 1;  // Matches ICmp=1
                 return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
             }
             if (Name.contains(".ppack") || Name.contains(".punpck"))
-                return 1 * widthMult;
+                return 3 * widthMult;  // Matches ShuffleVector=3
             if (Name.contains(".psll") || Name.contains(".psrl") || 
                 Name.contains(".psra"))
-                return 1 * widthMult;  // Low for shifts
+                return 1 * widthMult;  // Matches Shl/LShr/AShr=1
             if (Name.contains(".sad")) {
-                unsigned base = 3;
+                unsigned base = 3;  // Matches custom sad (element-sensitive)
                 return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
             }
         }
@@ -118,140 +117,140 @@ unsigned getIntrinsicCostX86(StringRef Name)
 
     if (Name.starts_with("llvm.x86.avx512")) {
         if (Name.contains(".add") || Name.contains(".sub")) {
-            unsigned base = 1;
+            unsigned base = 1;  // Matches Add/Sub=1
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".mul")) {
-            unsigned base = 2;
+            unsigned base = 3;  // Matches Mul=3 (adjusted from 2 for alignment)
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".div")) {
-            unsigned base = 12;
+            unsigned base = 15;  // Approx FDiv=17/UDiv=12 avg, aligned to AArch64 div=15
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".sqrt")) {
-            unsigned base = 12;
+            unsigned base = 12;  // Softened from 12, aligned to AArch64 sqrt=20 but capped for AVX512 throughput
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
 
         if (Name.contains(".fma") || Name.contains(".fmsub") ||
             Name.contains(".fnmadd") || Name.contains(".fnmsub")) {
-            unsigned base = 3;
+            unsigned base = 5;  // FMul=6 + FAdd=4 fused, avg 5 for alignment
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
 
         if (Name.contains(".cmp") || Name.contains(".pcmp")) {
-            unsigned base = 1;
+            unsigned base = 1;  // Matches ICmp=1
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
 
         if (Name.contains(".and") || Name.contains(".or") || 
             Name.contains(".xor") || Name.contains(".andnot"))
-            return 1 * widthMult;
+            return 1 * widthMult;  // Matches And/Or/Xor=1
 
         if (Name.contains(".perm") || Name.contains(".shuf"))
-            return 1 * widthMult;
+            return 3 * widthMult;  // Matches ShuffleVector=3 (adjusted from 1 for complexity)
         if (Name.contains(".insert") || Name.contains(".extract"))
-            return 1;
+            return 3;  // Matches Insert/ExtractElement=3
         if (Name.contains(".broadcast"))
-            return 1;
+            return 1;  // Low cost
         if (Name.contains(".align"))
-            return 1 * widthMult;
+            return 1 * widthMult;  // Low cost
 
         if (Name.contains(".mask"))
-            return 1;
+            return 1;  // Low cost
         if (Name.contains(".cmp") && Name.contains(".mask")) {
-            unsigned base = 1;
+            unsigned base = 1;  // Matches ICmp=1
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
 
         if (Name.contains(".cvt")) {
-            unsigned base = 2;
+            unsigned base = 2;  // Low for conversions, aligned
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
         if (Name.contains(".cvtps2ph") || Name.contains(".cvtph2ps")) {
-            unsigned base = 3;
+            unsigned base = 3;  // Matches custom conversion
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
 
         if (Name.contains(".min") || Name.contains(".max")) {
-            unsigned base = 1;
+            unsigned base = 2;  // Aligned to Select=2 equiv
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
 
         if (Name.contains(".loadu") || Name.contains(".load"))
-            return 3 + (widthMult / 2);
+            return 2 + (widthMult / 2);  // Matches Load=2, softened
         if (Name.contains(".storeu") || Name.contains(".store"))
-            return 4 + (widthMult / 2);
+            return 2 + (widthMult / 2);  // Matches Store=2, softened from 4
         if (Name.contains(".gather") || Name.contains(".scatter"))
-            return 8 * widthMult / 2;  // Moderate
+            return 5 * widthMult / 2;  // Moderate, aligned to AArch64 gather=5; X86 slight premium
 
         if (Name.contains(".conflict") || Name.contains(".lzcnt"))
-            return 2 * widthMult;
+            return 1 * widthMult;  // Aligned to ctlz=1, softened from 2
         if (Name.contains(".reduce")) {
-            unsigned base = 3;
+            unsigned base = 8;  // Higher for reductions, aligned to AArch64 reduce=6-8
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".range")) {
-            unsigned base = 3;
+            unsigned base = 3;  // Moderate
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
         if (Name.contains(".fixupimm")) {
-            unsigned base = 3;
+            unsigned base = 3;  // Moderate
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
         if (Name.contains(".getexp") || Name.contains(".getmant")) {
-            unsigned base = 3;
+            unsigned base = 3;  // Moderate
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
         if (Name.contains(".scalef")) {
-            unsigned base = 3;
+            unsigned base = 3;  // Moderate
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
 
         if (Name.contains(".padd") || Name.contains(".psub")) {
-            unsigned base = 1;
+            unsigned base = 1;  // Matches Add/Sub=1
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".pmul")) {
-            unsigned base = 2;
+            unsigned base = 3;  // Matches Mul=3 (adjusted from 2)
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".pmadd")) {
-            unsigned base = 2;
+            unsigned base = 5;  // Mul+Add fused, aligned to fma=5
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".psll") || Name.contains(".psrl") || 
             Name.contains(".psra"))
-            return 1 * widthMult;
+            return 1 * widthMult;  // Matches Shl/LShr/AShr=1
         if (Name.contains(".pabs"))
-            return 1 * widthMult;
+            return 1 * widthMult;  // Low cost
         if (Name.contains(".pmin") || Name.contains(".pmax")) {
-            unsigned base = 1;
+            unsigned base = 2;  // Aligned to Select=2 equiv
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
         if (Name.contains(".sad")) {
-            unsigned base = 3;
+            unsigned base = 3;  // Moderate, aligned
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".dbpsadbw")) {
-            unsigned base = 4;
+            unsigned base = 4;  // Moderate, aligned to AArch64 .sdot=4
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0) + (isHorizontal ? widthMult : 0);
         }
         if (Name.contains(".maskz"))
-            return 2;
+            return 2;  // Low cost
 
         if (Name.contains(".vp2intersect")) {
-            unsigned base = 3;
+            unsigned base = 3;  // Moderate
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
         if (Name.contains(".vpmadd52")) {
-            unsigned base = 4;
+            unsigned base = 5;  // Aligned to fma=5
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
-        if (Name.contains(".vpopcnt")) return 2 * widthMult;
+        if (Name.contains(".vpopcnt")) return 3 * widthMult;  // Aligned to ctpop=3
         if (Name.contains(".vpclmulqdq")) {
-            unsigned base = 5;
+            unsigned base = 5;  // High, aligned to AArch64 .pmull=4+1
             return base * widthMult + (isElementSensitive(Name) ? typeAdj : 0);
         }
     }
