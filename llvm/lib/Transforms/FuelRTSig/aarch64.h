@@ -540,56 +540,23 @@ unsigned getIntrinsicCostAArch64(StringRef Name, IRBuilder<> &Builder, CallInst 
             Name.contains(".whilehs") || Name.contains(".whilehi") || Name.contains(".whilerw") || Name.contains(".whilewr"))
             return 3;
 
-        // Memory operations (ld1, ld2, ld3, ld4, st1, st2, st3, st4, ldnt1, ldnf1, ldff1, ld1rq, ld1ro, stnt1, etc.)
-        if (Name.contains(".ld1") || Name.contains(".ldff1") || Name.contains(".ldnt1") || Name.contains(".ldnf1") || Name.contains(".ld1rq") || Name.contains(".ld1ro") || Name.contains(".ld2") || Name.contains(".ld3") || Name.contains(".ld4") || Name.contains(".ld1_gather") || Name.contains(".ldff1_gather") || Name.contains(".ldnt1_gather") || Name.contains(".ld1_gather_index") || Name.contains(".ldff1_gather_index") || Name.contains(".ld1_gather_sxtw") || Name.contains(".ld1_gather_uxtw") || Name.contains(".ldff1_gather_sxtw") || Name.contains(".ldff1_gather_uxtw") || Name.contains(".ld1_gather_sxtw_index") || Name.contains(".ld1_gather_uxtw_index") || Name.contains(".ldff1_gather_sxtw_index") || Name.contains(".ldff1_gather_uxtw_index") || Name.contains(".ld1_gather_scalar_offset") || Name.contains(".ldff1_gather_scalar_offset") || Name.contains(".ldnt1_gather_scalar_offset") || Name.contains(".ld1q_gather") || Name.contains(".ld1q_gather_scalar_offset") || Name.contains(".ld1q_gather_index") || Name.contains(".ld1q_gather_vector_offset") || Name.contains(".ld2q_sret") || Name.contains(".ld3q_sret") || Name.contains(".ld4q_sret") || Name.contains(".ld1uwq") || Name.contains(".ld1udq") || Name.contains(".ld1_pn_x2") || Name.contains(".ld1_pn_x4") || Name.contains(".ldnt1_pn_x2") || Name.contains(".ldnt1_pn_x4") || Name.contains(".luti2_lane_zt") || Name.contains(".luti4_lane_zt") || Name.contains(".luti2_lane_zt_x2") || Name.contains(".luti4_lane_zt_x2") || Name.contains(".luti2_lane_zt_x4") || Name.contains(".luti4_lane_zt_x4"))
-        {
-            unsigned base = Name.contains(".gather") || Name.contains(".ldff1") || Name.contains(".ldnf1") ? 5 : 3;  // Matches Load=3, +2 for complex
+        // Memory operations - handle structure first to avoid overlap, then general with non-temporal adjustment
+        if (Name.contains(".ld2") || Name.contains(".st2")) {
+            unsigned base = Name.contains(".ld") ? 6 : 6;  // Approx 2x Load/Store=3
             scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + (sensitive ? typeAdj : 0)));
-        }
-
-        if (Name.contains(".st1") || Name.contains(".stnt1") || Name.contains(".st2") || Name.contains(".st3") || Name.contains(".st4") || Name.contains(".st1_scatter") || Name.contains(".stnt1_scatter") || Name.contains(".st1_scatter_index") || Name.contains(".st1_scatter_sxtw") || Name.contains(".st1_scatter_uxtw") || Name.contains(".st1_scatter_sxtw_index") || Name.contains(".st1_scatter_uxtw_index") || Name.contains(".st1_scatter_scalar_offset") || Name.contains(".stnt1_scatter_scalar_offset") || Name.contains(".st1q_scatter") || Name.contains(".st1q_scatter_scalar_offset") || Name.contains(".st1q_scatter_index") || Name.contains(".st1q_scatter_vector_offset") || Name.contains(".st2q") || Name.contains(".st3q") || Name.contains(".st4q") || Name.contains(".st1wq") || Name.contains(".st1dq") || Name.contains(".st1_pn_x2") || Name.contains(".st1_pn_x4") || Name.contains(".stnt1_pn_x2") || Name.contains(".stnt1_pn_x4"))
-        {
-            unsigned base = Name.contains(".scatter") ? 5 : 3;  // Matches Store=3, +2 for complex
+        } else if (Name.contains(".ld3") || Name.contains(".st3")) {
+            unsigned base = Name.contains(".ld") ? 9 : 9;  // Approx 3x
             scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + (sensitive ? typeAdj : 0)));
-        }
-
-        // Non-temporal loads/stores (already covered in loads/stores, but explicit if needed)
-        if (Name.contains(".ldnt1") || Name.contains(".stnt1"))
-        {
-            unsigned base = 2;  // Lower base
+        } else if (Name.contains(".ld4") || Name.contains(".st4")) {
+            unsigned base = Name.contains(".ld") ? 12 : 12;  // Approx 4x
             scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + (sensitive ? typeAdj : 0)));
-        }
-
-        // Structure loads/stores (ld2, ld3, ld4, st2, st3, st4; scale with multiples)
-        if (Name.contains(".ld2"))
-        {
-            unsigned base = 6;  // Approx 2x load
+        } else if (Name.contains(".ld1") || Name.contains(".ldff1") || Name.contains(".ldnt1") || Name.contains(".ldnf1") || Name.contains(".ld1rq") || Name.contains(".ld1ro") || Name.contains(".ld1_gather") || Name.contains(".ldff1_gather") || Name.contains(".ldnt1_gather") || Name.contains(".ld1_gather_index") || Name.contains(".ldff1_gather_index") || Name.contains(".ld1_gather_sxtw") || Name.contains(".ld1_gather_uxtw") || Name.contains(".ldff1_gather_sxtw") || Name.contains(".ldff1_gather_uxtw") || Name.contains(".ld1_gather_sxtw_index") || Name.contains(".ld1_gather_uxtw_index") || Name.contains(".ldff1_gather_sxtw_index") || Name.contains(".ldff1_gather_uxtw_index") || Name.contains(".ld1_gather_scalar_offset") || Name.contains(".ldff1_gather_scalar_offset") || Name.contains(".ldnt1_gather_scalar_offset") || Name.contains(".ld1q_gather") || Name.contains(".ld1q_gather_scalar_offset") || Name.contains(".ld1q_gather_index") || Name.contains(".ld1q_gather_vector_offset") || Name.contains(".ld2q_sret") || Name.contains(".ld3q_sret") || Name.contains(".ld4q_sret") || Name.contains(".ld1uwq") || Name.contains(".ld1udq") || Name.contains(".ld1_pn_x2") || Name.contains(".ld1_pn_x4") || Name.contains(".ldnt1_pn_x2") || Name.contains(".ldnt1_pn_x4") || Name.contains(".luti2_lane_zt") || Name.contains(".luti4_lane_zt") || Name.contains(".luti2_lane_zt_x2") || Name.contains(".luti4_lane_zt_x2") || Name.contains(".luti2_lane_zt_x4") || Name.contains(".luti4_lane_zt_x4")) {
+            unsigned base = (Name.contains(".gather") || Name.contains(".ldff1") || Name.contains(".ldnf1")) ? 5 : 3;  // Base for loads
+            if (Name.contains(".ldnt1")) base = 2;  // Non-temporal adjustment
             scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + (sensitive ? typeAdj : 0)));
-        }
-        if (Name.contains(".ld3"))
-        {
-            unsigned base = 9;  // Approx 3x
-            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + (sensitive ? typeAdj : 0)));
-        }
-        if (Name.contains(".ld4"))
-        {
-            unsigned base = 12;  // Approx 4x
-            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + (sensitive ? typeAdj : 0)));
-        }
-
-        if (Name.contains(".st2"))
-        {
-            unsigned base = 6;
-            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + (sensitive ? typeAdj : 0)));
-        }
-        if (Name.contains(".st3"))
-        {
-            unsigned base = 9;
-            scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + (sensitive ? typeAdj : 0)));
-        }
-        if (Name.contains(".st4"))
-        {
-            unsigned base = 12;
+        } else if (Name.contains(".st1") || Name.contains(".stnt1") || Name.contains(".st1_scatter") || Name.contains(".stnt1_scatter") || Name.contains(".st1_scatter_index") || Name.contains(".st1_scatter_sxtw") || Name.contains(".st1_scatter_uxtw") || Name.contains(".st1_scatter_sxtw_index") || Name.contains(".st1_scatter_uxtw_index") || Name.contains(".st1_scatter_scalar_offset") || Name.contains(".stnt1_scatter_scalar_offset") || Name.contains(".st1q_scatter") || Name.contains(".st1q_scatter_scalar_offset") || Name.contains(".st1q_scatter_index") || Name.contains(".st1q_scatter_vector_offset") || Name.contains(".st2q") || Name.contains(".st3q") || Name.contains(".st4q") || Name.contains(".st1wq") || Name.contains(".st1dq") || Name.contains(".st1_pn_x2") || Name.contains(".st1_pn_x4") || Name.contains(".stnt1_pn_x2") || Name.contains(".stnt1_pn_x4")) {
+            unsigned base = Name.contains(".scatter") ? 5 : 3;  // Base for stores
+            if (Name.contains(".stnt1")) base = 2;  // Non-temporal adjustment
             scaledCost = Builder.CreateMul(numElements, ConstantInt::get(I64Ty, base + (sensitive ? typeAdj : 0)));
         }
 
@@ -700,14 +667,16 @@ unsigned getIntrinsicCostAArch64(StringRef Name, IRBuilder<> &Builder, CallInst 
         ThreadLocalFuelGlobal->setThreadLocal(true);
     
         LoadInst *CurrentFuel = Builder.CreateLoad(I64Ty, ThreadLocalFuelGlobal);
-        CurrentFuel->setMetadata("op_sig", OpSigMD);
+        if (auto *Inst = dyn_cast<Instruction>(CurrentFuel))
+            Inst->setMetadata("op_sig", OpSigMD);
     
         Value *NewFuel = Builder.CreateAdd(CurrentFuel, scaledCost);
         if (auto *Inst = dyn_cast<Instruction>(NewFuel))
             Inst->setMetadata("op_sig", OpSigMD);
     
         StoreInst *StoreFuel = Builder.CreateStore(NewFuel, ThreadLocalFuelGlobal);
-        StoreFuel->setMetadata("op_sig", OpSigMD);
+        if (auto *Inst = dyn_cast<Instruction>(StoreFuel))
+            Inst->setMetadata("op_sig", OpSigMD);
     
         return 0;  // Static cost handled dynamically
     }
