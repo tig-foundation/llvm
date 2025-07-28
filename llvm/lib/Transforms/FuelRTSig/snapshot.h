@@ -1,8 +1,24 @@
+// note: ASLR might be a problem here
+// note: use relative addresses for the snapshot stack
+// figure out what to filter out from the snapshot
+// might have to track memory pages, CoW
+// should be fine without for just verifying calculations and detecting divergences
+
 #pragma once
 #include <cstdint>
 #include <vector>
 #include <cstring>
 #include <type_traits>
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/ADT/Triple.h"
+
+using namespace llvm;
 
 struct Snapshot {
     uint64_t fuel;
@@ -26,13 +42,8 @@ struct SnapshotX86 : public Snapshot {
         uint64_t low, high;
     } ymm_upper[16];
     
-    struct {
-        uint64_t q0, q1, q2, q3;
-    } zmm_upper[32];
-    
     uint16_t cs, ds, es, fs, gs, ss;
     uint64_t cr0, cr2, cr3, cr4;
-    uint64_t msr_efer, msr_star, msr_lstar;
 };
 
 struct SnapshotAArch64 : public Snapshot {
@@ -44,425 +55,813 @@ struct SnapshotAArch64 : public Snapshot {
     } v[32];
     
     uint64_t nzcv, fpcr, fpsr, tpidr_el0, tpidrro_el0;
-    uint64_t elr_el1, spsr_el1;
-    uint64_t ttbr0_el1, ttbr1_el1, tcr_el1, mair_el1, sctlr_el1;
 };
 
-namespace RegisterMasks {
-    namespace X86 {
-        enum Field : uint8_t {
-            BASE_FIELDS = 0,
-            RAX = 4, RBX, RCX, RDX, RSI, RDI, RSP, RBP,
-            R8, R9, R10, R11, R12, R13, R14, R15,
-            RFLAGS = 20,
-            XMM0 = 21, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
-            XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15,
-            YMM0_UPPER = 37, YMM1_UPPER, YMM2_UPPER, YMM3_UPPER,
-            YMM4_UPPER, YMM5_UPPER, YMM6_UPPER, YMM7_UPPER,
-            YMM8_UPPER, YMM9_UPPER, YMM10_UPPER, YMM11_UPPER,
-            YMM12_UPPER, YMM13_UPPER, YMM14_UPPER, YMM15_UPPER,
-            SEGMENTS = 53,
-            CR0 = 54, CR2, CR3, CR4,
-            MSR_EFER = 58, MSR_STAR, MSR_LSTAR,
-            ZMM_START = 61
-        };
+// Delta compression structures as LLVM types
+struct DeltaHeader {
+    uint64_t changed_mask[4];  // Bitmask for changed fields
+    uint32_t compressed_size;  // Size of compressed data
+    uint32_t padding;
+};
+
+class SnapshotPass {
+private:
+    Module *M;
+    LLVMContext *Context;
+    IRBuilder<> *Builder;
+    
+    // Global variables for snapshot state
+    GlobalVariable *PreviousSnapshotGV;
+    GlobalVariable *SnapshotStackGV;
+    GlobalVariable *StackDepthGV;
+    
+    // LLVM types for snapshot structures
+    StructType *BaseSnapshotTy;
+    StructType *X86SnapshotTy;
+    StructType *AArch64SnapshotTy;
+    StructType *DeltaHeaderTy;
+    
+    // Runtime functions
+    Function *CaptureRegistersFunc;
+    Function *CreateDeltaFunc;
+    Function *StoreSnapshotFunc;
+    Function *CreateSnapshotFunc;
+
+public:
+    SnapshotPass(Module *M) : M(M), Context(&M->getContext()) {
+        Builder = new IRBuilder<>(*Context);
+        createSnapshotTypes();
+        createGlobalState();
+        createRuntimeFunctions();
     }
     
-    namespace AArch64 {
-        enum Field : uint8_t {
-            BASE_FIELDS = 0,
-            X0 = 4, X1, X2, X3, X4, X5, X6, X7,
-            X8, X9, X10, X11, X12, X13, X14, X15,
-            X16, X17, X18, X19, X20, X21, X22, X23,
-            X24, X25, X26, X27, X28, X29, X30, SP,
-            V0 = 36, V1, V2, V3, V4, V5, V6, V7,
-            V8, V9, V10, V11, V12, V13, V14, V15,
-            V16, V17, V18, V19, V20, V21, V22, V23,
-            V24, V25, V26, V27, V28, V29, V30, V31,
-            NZCV = 68, FPCR, FPSR, TPIDR_EL0, TPIDRRO_EL0,
-            ELR_EL1, SPSR_EL1, TTBR0_EL1, TTBR1_EL1, TCR_EL1, MAIR_EL1, SCTLR_EL1
-        };
+    ~SnapshotPass() {
+        delete Builder;
+    }
+    
+    void instrumentFunction(Function &F);
+
+private:
+    void createSnapshotTypes();
+    void createGlobalState();
+    void createRuntimeFunctions();
+    
+    // Architecture-specific implementations
+    void createX86CaptureFunction();
+    void createAArch64CaptureFunction();
+    
+    // Delta compression functions
+    void createDeltaCompressionFunction();
+    void createSnapshotStorageFunction();
+    
+    // Helper functions
+    StructType* createX86SnapshotType();
+    StructType* createAArch64SnapshotType();
+    StructType* createBaseSnapshotType();
+    
+    Value* createInlineAsmCapture(const std::string &asmStr, 
+                                  const std::string &constraints,
+                                  ArrayRef<Type*> argTypes,
+                                  ArrayRef<Value*> args);
+};
+
+void SnapshotPass::createSnapshotTypes() {
+    // Base snapshot type
+    BaseSnapshotTy = createBaseSnapshotType();
+    
+    // Architecture-specific types
+    X86SnapshotTy = createX86SnapshotType();
+    AArch64SnapshotTy = createAArch64SnapshotType();
+    
+    // Delta header type
+    Type *I64Ty = Type::getInt64Ty(*Context);
+    Type *I32Ty = Type::getInt32Ty(*Context);
+    DeltaHeaderTy = StructType::create(*Context, {
+        ArrayType::get(I64Ty, 4),  // changed_mask[4]
+        I32Ty,                     // compressed_size
+        I32Ty                      // padding
+    }, "struct.DeltaHeader");
+}
+
+StructType* SnapshotPass::createBaseSnapshotType() {
+    Type *I64Ty = Type::getInt64Ty(*Context);
+    return StructType::create(*Context, {
+        I64Ty,  // fuel
+        I64Ty,  // runtime_sig
+        I64Ty,  // memory_usage
+        I64Ty   // instruction_count
+    }, "struct.Snapshot");
+}
+
+StructType* SnapshotPass::createX86SnapshotType() {
+    Type *I64Ty = Type::getInt64Ty(*Context);
+    Type *I16Ty = Type::getInt16Ty(*Context);
+    
+    // XMM register type (128-bit)
+    StructType *XMMTy = StructType::create(*Context, {I64Ty, I64Ty}, "struct.XMM");
+    
+    std::vector<Type*> fields;
+    
+    // Base snapshot fields
+    fields.insert(fields.end(), BaseSnapshotTy->element_begin(), BaseSnapshotTy->element_end());
+    
+    // General purpose registers (16 x 64-bit)
+    for (int i = 0; i < 16; i++) {
+        fields.push_back(I64Ty);
+    }
+    
+    // RFLAGS
+    fields.push_back(I64Ty);
+    
+    // XMM registers (16 x 128-bit)
+    for (int i = 0; i < 16; i++) {
+        fields.push_back(XMMTy);
+    }
+    
+    // YMM upper halves (16 x 128-bit)
+    for (int i = 0; i < 16; i++) {
+        fields.push_back(XMMTy);
+    }
+    
+    // Segment registers (6 x 16-bit)
+    for (int i = 0; i < 6; i++) {
+        fields.push_back(I16Ty);
+    }
+    
+    // Control registers (4 x 64-bit)
+    for (int i = 0; i < 4; i++) {
+        fields.push_back(I64Ty);
+    }
+    
+    return StructType::create(*Context, fields, "struct.SnapshotX86");
+}
+
+StructType* SnapshotPass::createAArch64SnapshotType() {
+    Type *I64Ty = Type::getInt64Ty(*Context);
+    
+    // Vector register type (128-bit)
+    StructType *VecTy = StructType::create(*Context, {I64Ty, I64Ty}, "struct.Vector");
+    
+    std::vector<Type*> fields;
+    
+    // Base snapshot fields
+    fields.insert(fields.end(), BaseSnapshotTy->element_begin(), BaseSnapshotTy->element_end());
+    
+    // X0-X30 registers (31 x 64-bit)
+    for (int i = 0; i < 31; i++) {
+        fields.push_back(I64Ty);
+    }
+    
+    // SP register
+    fields.push_back(I64Ty);
+    
+    // V0-V31 vector registers (32 x 128-bit)
+    for (int i = 0; i < 32; i++) {
+        fields.push_back(VecTy);
+    }
+    
+    // System registers (5 x 64-bit)
+    for (int i = 0; i < 5; i++) {
+        fields.push_back(I64Ty);
+    }
+    
+    return StructType::create(*Context, fields, "struct.SnapshotAArch64");
+}
+
+void SnapshotPass::createGlobalState() {
+    Type *I64Ty = Type::getInt64Ty(*Context);
+    Type *I32Ty = Type::getInt32Ty(*Context);
+    
+    // Previous snapshot for delta compression
+    Triple TT(M->getTargetTriple());
+    StructType *SnapshotTy = (TT.getArch() == Triple::x86_64) ? X86SnapshotTy : AArch64SnapshotTy;
+    
+    PreviousSnapshotGV = new GlobalVariable(
+        *M, SnapshotTy, false, GlobalValue::InternalLinkage,
+        Constant::getNullValue(SnapshotTy), "__previous_snapshot");
+    
+
+    // Snapshot stack (for storing delta-compressed snapshots)
+    Type *StackElementTy = StructType::create(*Context, {
+        DeltaHeaderTy,                           // Delta header
+        ArrayType::get(Type::getInt8Ty(*Context), 4096)  // Compressed data
+    }, "struct.StackElement");
+    
+    Type *StackTy = ArrayType::get(StackElementTy, 1000);  // Max 1000 snapshots
+    SnapshotStackGV = new GlobalVariable(
+        *M, StackTy, false, GlobalValue::InternalLinkage,
+        Constant::getNullValue(StackTy), "__snapshot_stack");
+    
+    // Stack depth
+    StackDepthGV = new GlobalVariable(
+        *M, I32Ty, false, GlobalValue::InternalLinkage,
+        ConstantInt::get(I32Ty, 0), "__stack_depth");
+}
+
+void SnapshotPass::createRuntimeFunctions() {
+    Triple TT(M->getTargetTriple());
+    
+    if (TT.getArch() == Triple::x86_64) {
+        createX86CaptureFunction();
+    } else if (TT.getArch() == Triple::aarch64) {
+        createAArch64CaptureFunction();
+    }
+    
+    createDeltaCompressionFunction();
+    createSnapshotStorageFunction();
+    
+    // Main snapshot creation function
+    FunctionType *CreateSnapshotTy = FunctionType::get(Type::getVoidTy(*Context), {}, false);
+    CreateSnapshotFunc = Function::Create(CreateSnapshotTy, Function::InternalLinkage, 
+                                         "__create_snapshot", M);
+    
+    BasicBlock *EntryBB = BasicBlock::Create(*Context, "entry", CreateSnapshotFunc);
+    Builder->SetInsertPoint(EntryBB);
+    
+    // Call register capture
+    Value *CurrentSnapshot = Builder->CreateCall(CaptureRegistersFunc);
+    
+    // Call delta compression
+    Value *DeltaData = Builder->CreateCall(CreateDeltaFunc, {CurrentSnapshot});
+    
+    // Call storage
+    Builder->CreateCall(StoreSnapshotFunc, {DeltaData});
+    
+    Builder->CreateRetVoid();
+}
+
+void SnapshotPass::createX86CaptureFunction() {
+    // Create function that captures x86_64 registers
+    FunctionType *CaptureTy = FunctionType::get(PointerType::get(X86SnapshotTy, 0), {}, false);
+    CaptureRegistersFunc = Function::Create(CaptureTy, Function::InternalLinkage, 
+                                           "__capture_x86_registers", M);
+    
+    BasicBlock *EntryBB = BasicBlock::Create(*Context, "entry", CaptureRegistersFunc);
+    Builder->SetInsertPoint(EntryBB);
+    
+    // Allocate snapshot structure
+    Value *SnapshotPtr = Builder->CreateAlloca(X86SnapshotTy, nullptr, "snapshot");
+    
+    // Capture base fields (fuel, runtime_sig, etc.)
+    // These would be loaded from global variables in a real implementation
+    Value *BasePtr = Builder->CreateStructGEP(X86SnapshotTy, SnapshotPtr, 0);
+    Value *FuelPtr = Builder->CreateStructGEP(BaseSnapshotTy, BasePtr, 0);
+    Builder->CreateStore(ConstantInt::get(Type::getInt64Ty(*Context), 0), FuelPtr);
+    
+    // Capture general purpose registers using inline assembly
+    std::string asmStr = 
+        "movq %%rax, %0\n\t"
+        "movq %%rbx, %1\n\t"
+        "movq %%rcx, %2\n\t"
+        "movq %%rdx, %3\n\t"
+        "movq %%rsi, %4\n\t"
+        "movq %%rdi, %5\n\t"
+        "movq %%rsp, %6\n\t"
+        "movq %%rbp, %7\n\t"
+        "movq %%r8, %8\n\t"
+        "movq %%r9, %9\n\t"
+        "movq %%r10, %10\n\t"
+        "movq %%r11, %11\n\t"
+        "movq %%r12, %12\n\t"
+        "movq %%r13, %13\n\t"
+        "movq %%r14, %14\n\t"
+        "movq %%r15, %15";
+    
+    std::string constraints = "=*m,=*m,=*m,=*m,=*m,=*m,=*m,=*m,=*m,=*m,=*m,=*m,=*m,=*m,=*m,=*m";
+    
+    std::vector<Type*> argTypes(16, PointerType::get(Type::getInt64Ty(*Context), 0));
+    std::vector<Value*> args;
+    
+    // Create GEPs for each GPR field
+    for (int i = 0; i < 16; i++) {
+        Value *GEP = Builder->CreateStructGEP(X86SnapshotTy, SnapshotPtr, 4 + i);
+        args.push_back(GEP);
+    }
+    
+    createInlineAsmCapture(asmStr, constraints, argTypes, args);
+    
+    // Capture RFLAGS
+    Value *RFlagsPtr = Builder->CreateStructGEP(X86SnapshotTy, SnapshotPtr, 20);
+    std::string rflagsAsm = "pushfq\n\tpopq %0";
+    std::string rflagsConstraints = "=*m";
+    createInlineAsmCapture(rflagsAsm, rflagsConstraints, 
+                          {PointerType::get(Type::getInt64Ty(*Context), 0)}, {RFlagsPtr});
+    
+    // Capture XMM registers
+    for (int i = 0; i < 16; i++) {
+        Value *XMMPtr = Builder->CreateStructGEP(X86SnapshotTy, SnapshotPtr, 21 + i);
+        std::string xmmAsm = "movdqu %%xmm" + std::to_string(i) + ", %0";
+        std::string xmmConstraints = "=*m";
+        createInlineAsmCapture(xmmAsm, xmmConstraints, 
+                              {PointerType::get(StructType::getTypeByName(*Context, "struct.XMM"), 0)}, 
+                              {XMMPtr});
+    }
+    
+    Builder->CreateRet(SnapshotPtr);
+}
+
+void SnapshotPass::createAArch64CaptureFunction() {
+    // Create function that captures AArch64 registers
+    FunctionType *CaptureTy = FunctionType::get(PointerType::get(AArch64SnapshotTy, 0), {}, false);
+    CaptureRegistersFunc = Function::Create(CaptureTy, Function::InternalLinkage, 
+                                           "__capture_aarch64_registers", M);
+    
+    BasicBlock *EntryBB = BasicBlock::Create(*Context, "entry", CaptureRegistersFunc);
+    Builder->SetInsertPoint(EntryBB);
+    
+    // Allocate snapshot structure
+    Value *SnapshotPtr = Builder->CreateAlloca(AArch64SnapshotTy, nullptr, "snapshot");
+    
+    // Capture base fields
+    Value *BasePtr = Builder->CreateStructGEP(AArch64SnapshotTy, SnapshotPtr, 0);
+    Value *FuelPtr = Builder->CreateStructGEP(BaseSnapshotTy, BasePtr, 0);
+    Builder->CreateStore(ConstantInt::get(Type::getInt64Ty(*Context), 0), FuelPtr);
+    
+    // Capture X0-X30 registers
+    std::vector<Value*> args;
+    std::vector<Type*> argTypes;
+    std::string asmStr = "";
+    std::string constraints = "";
+    
+    for (int i = 0; i < 31; i++) {
+        if (i > 0) {
+            asmStr += "\n\t";
+            constraints += ",";
+        }
+        asmStr += "str x" + std::to_string(i) + ", %";
+        asmStr += std::to_string(i);
+        constraints += "=*m";
+        
+        Value *RegPtr = Builder->CreateStructGEP(AArch64SnapshotTy, SnapshotPtr, 4 + i);
+        args.push_back(RegPtr);
+        argTypes.push_back(PointerType::get(Type::getInt64Ty(*Context), 0));
+    }
+    
+    createInlineAsmCapture(asmStr, constraints, argTypes, args);
+    
+    // Capture SP register
+    Value *SPPtr = Builder->CreateStructGEP(AArch64SnapshotTy, SnapshotPtr, 35);
+    std::string spAsm = "mov %0, sp";
+    std::string spConstraints = "=*m";
+    createInlineAsmCapture(spAsm, spConstraints, 
+                          {PointerType::get(Type::getInt64Ty(*Context), 0)}, {SPPtr});
+    
+    // Capture vector registers V0-V31
+    for (int i = 0; i < 32; i++) {
+        Value *VPtr = Builder->CreateStructGEP(AArch64SnapshotTy, SnapshotPtr, 36 + i);
+        std::string vAsm = "str q" + std::to_string(i) + ", %0";
+        std::string vConstraints = "=*m";
+        createInlineAsmCapture(vAsm, vConstraints, 
+                              {PointerType::get(StructType::getTypeByName(*Context, "struct.Vector"), 0)}, 
+                              {VPtr});
+    }
+    
+    // Capture system registers
+    Value *NZCVPtr = Builder->CreateStructGEP(AArch64SnapshotTy, SnapshotPtr, 68);
+    std::string nzcvAsm = "mrs %0, nzcv";
+    std::string nzcvConstraints = "=*m";
+    createInlineAsmCapture(nzcvAsm, nzcvConstraints, 
+                          {PointerType::get(Type::getInt64Ty(*Context), 0)}, {NZCVPtr});
+    
+    Builder->CreateRet(SnapshotPtr);
+}
+
+Value* SnapshotPass::createInlineAsmCapture(const std::string &asmStr, 
+                                            const std::string &constraints,
+                                            ArrayRef<Type*> argTypes,
+                                            ArrayRef<Value*> args) {
+    FunctionType *asmFuncTy = FunctionType::get(Type::getVoidTy(*Context), argTypes, false);
+    InlineAsm *inlineAsm = InlineAsm::get(asmFuncTy, asmStr, constraints, true);
+    return Builder->CreateCall(inlineAsm, args);
+}
+
+void SnapshotPass::createDeltaCompressionFunction() {
+    Triple TT(M->getTargetTriple());
+    StructType *SnapshotTy = (TT.getArch() == Triple::x86_64) ? X86SnapshotTy : AArch64SnapshotTy;
+    
+    // Function that creates delta between current and previous snapshot
+    FunctionType *DeltaTy = FunctionType::get(
+        PointerType::get(Type::getInt8Ty(*Context), 0),  // Returns compressed data
+        {PointerType::get(SnapshotTy, 0)},               // Takes current snapshot
+        false);
+    
+    CreateDeltaFunc = Function::Create(DeltaTy, Function::InternalLinkage, 
+                                      "__create_delta", M);
+    
+    BasicBlock *EntryBB = BasicBlock::Create(*Context, "entry", CreateDeltaFunc);
+    Builder->SetInsertPoint(EntryBB);
+    
+    Value *CurrentSnapshot = CreateDeltaFunc->getArg(0);
+    
+    // Allocate delta header
+    Value *DeltaHeader = Builder->CreateAlloca(DeltaHeaderTy, nullptr, "delta_header");
+    
+    // Initialize changed mask to zero
+    Value *ChangedMaskPtr = Builder->CreateStructGEP(DeltaHeaderTy, DeltaHeader, 0);
+    Builder->CreateStore(Constant::getNullValue(ArrayType::get(Type::getInt64Ty(*Context), 4)), 
+                        ChangedMaskPtr);
+    
+    // Allocate compressed data buffer
+    Value *CompressedData = Builder->CreateAlloca(ArrayType::get(Type::getInt8Ty(*Context), 4096), 
+                                                  nullptr, "compressed_data");
+    Value *CompressedSize = Builder->CreateAlloca(Type::getInt32Ty(*Context), nullptr, "compressed_size");
+    Builder->CreateStore(ConstantInt::get(Type::getInt32Ty(*Context), 0), CompressedSize);
+    
+    // Load previous snapshot
+    Value *PreviousSnapshot = Builder->CreateLoad(SnapshotTy, PreviousSnapshotGV);
+    Value *PreviousPtr = Builder->CreateAlloca(SnapshotTy);
+    Builder->CreateStore(PreviousSnapshot, PreviousPtr);
+    
+    // Compare each field and build delta
+    uint32_t numFields = SnapshotTy->getNumElements();
+    for (uint32_t i = 0; i < numFields; i++) {
+        Value *CurrentFieldPtr = Builder->CreateStructGEP(SnapshotTy, CurrentSnapshot, i);
+        Value *PreviousFieldPtr = Builder->CreateStructGEP(SnapshotTy, PreviousPtr, i);
+        
+        Value *CurrentField = Builder->CreateLoad(SnapshotTy->getElementType(i), CurrentFieldPtr);
+        Value *PreviousField = Builder->CreateLoad(SnapshotTy->getElementType(i), PreviousFieldPtr);
+        
+        // Compare fields
+        Value *FieldChanged;
+        Type *FieldTy = SnapshotTy->getElementType(i);
+        
+        if (FieldTy->isIntegerTy()) {
+            FieldChanged = Builder->CreateICmpNE(CurrentField, PreviousField);
+        } else if (FieldTy->isStructTy()) {
+            // For struct types, do a memcmp
+            Value *CmpResult = Builder->CreateCall(
+                Intrinsic::getDeclaration(M, Intrinsic::memcmp),
+                {CurrentFieldPtr, PreviousFieldPtr, 
+                 ConstantInt::get(Type::getInt64Ty(*Context), 
+                                 M->getDataLayout().getTypeStoreSize(FieldTy))});
+            FieldChanged = Builder->CreateICmpNE(CmpResult, ConstantInt::get(Type::getInt32Ty(*Context), 0));
+        }
+        
+        // If field changed, set bit in mask and add to compressed data
+        BasicBlock *FieldChangedBB = BasicBlock::Create(*Context, "field_changed", CreateDeltaFunc);
+        BasicBlock *FieldUnchangedBB = BasicBlock::Create(*Context, "field_unchanged", CreateDeltaFunc);
+        BasicBlock *NextFieldBB = BasicBlock::Create(*Context, "next_field", CreateDeltaFunc);
+        
+        Builder->CreateCondBr(FieldChanged, FieldChangedBB, FieldUnchangedBB);
+        
+        // Field changed: set bit and copy data
+        Builder->SetInsertPoint(FieldChangedBB);
+        
+        // Set bit in changed mask
+        uint32_t maskIndex = i / 64;
+        uint32_t bitIndex = i % 64;
+        Value *MaskPtr = Builder->CreateConstGEP2_32(ArrayType::get(Type::getInt64Ty(*Context), 4), 
+                                                     ChangedMaskPtr, 0, maskIndex);
+        Value *CurrentMask = Builder->CreateLoad(Type::getInt64Ty(*Context), MaskPtr);
+        Value *BitMask = ConstantInt::get(Type::getInt64Ty(*Context), 1ULL << bitIndex);
+        Value *NewMask = Builder->CreateOr(CurrentMask, BitMask);
+        Builder->CreateStore(NewMask, MaskPtr);
+        
+        // Copy field data to compressed buffer
+        Value *CurrentSize = Builder->CreateLoad(Type::getInt32Ty(*Context), CompressedSize);
+        Value *DataPtr = Builder->CreateGEP(Type::getInt8Ty(*Context), CompressedData, 
+                                           {ConstantInt::get(Type::getInt32Ty(*Context), 0), CurrentSize});
+        
+        uint64_t fieldSize = M->getDataLayout().getTypeStoreSize(FieldTy);
+        Builder->CreateCall(
+            Intrinsic::getDeclaration(M, Intrinsic::memcpy, 
+                                     {Type::getInt8PtrTy(*Context), Type::getInt8PtrTy(*Context), 
+                                      Type::getInt64Ty(*Context)}),
+            {DataPtr, Builder->CreateBitCast(CurrentFieldPtr, Type::getInt8PtrTy(*Context)),
+             ConstantInt::get(Type::getInt64Ty(*Context), fieldSize),
+             ConstantInt::getFalse(*Context)});
+        
+        Value *NewSize = Builder->CreateAdd(CurrentSize, 
+                                           ConstantInt::get(Type::getInt32Ty(*Context), fieldSize));
+        Builder->CreateStore(NewSize, CompressedSize);
+        
+        Builder->CreateBr(NextFieldBB);
+        
+        // Field unchanged: do nothing
+        Builder->SetInsertPoint(FieldUnchangedBB);
+        Builder->CreateBr(NextFieldBB);
+        
+        Builder->SetInsertPoint(NextFieldBB);
+    }
+    
+    // Update previous snapshot
+    Value *CurrentSnapshotValue = Builder->CreateLoad(SnapshotTy, CurrentSnapshot);
+    Builder->CreateStore(CurrentSnapshotValue, PreviousSnapshotGV);
+    
+    // Store compressed size in header
+    Value *CompressedSizeValue = Builder->CreateLoad(Type::getInt32Ty(*Context), CompressedSize);
+    Value *CompressedSizePtr = Builder->CreateStructGEP(DeltaHeaderTy, DeltaHeader, 1);
+    Builder->CreateStore(CompressedSizeValue, CompressedSizePtr);
+    
+    // Return pointer to compressed data (header + data)
+    Value *ResultPtr = Builder->CreateAlloca(ArrayType::get(Type::getInt8Ty(*Context), 4096 + 32));
+    
+    // Copy header
+    Builder->CreateCall(
+        Intrinsic::getDeclaration(M, Intrinsic::memcpy, 
+                                 {Type::getInt8PtrTy(*Context), Type::getInt8PtrTy(*Context), 
+                                  Type::getInt64Ty(*Context)}),
+        {Builder->CreateBitCast(ResultPtr, Type::getInt8PtrTy(*Context)),
+         Builder->CreateBitCast(DeltaHeader, Type::getInt8PtrTy(*Context)),
+         ConstantInt::get(Type::getInt64Ty(*Context), 32),  // sizeof(DeltaHeader)
+         ConstantInt::getFalse(*Context)});
+    
+    // Copy compressed data
+    Value *DataDestPtr = Builder->CreateGEP(Type::getInt8Ty(*Context), ResultPtr, 
+                                           {ConstantInt::get(Type::getInt32Ty(*Context), 0),
+                                            ConstantInt::get(Type::getInt32Ty(*Context), 32)});
+    Builder->CreateCall(
+        Intrinsic::getDeclaration(M, Intrinsic::memcpy, 
+                                 {Type::getInt8PtrTy(*Context), Type::getInt8PtrTy(*Context), 
+                                  Type::getInt64Ty(*Context)}),
+        {DataDestPtr, Builder->CreateBitCast(CompressedData, Type::getInt8PtrTy(*Context)),
+         Builder->CreateZExt(CompressedSizeValue, Type::getInt64Ty(*Context)),
+         ConstantInt::getFalse(*Context)});
+    
+    Builder->CreateRet(Builder->CreateBitCast(ResultPtr, Type::getInt8PtrTy(*Context)));
+}
+
+void SnapshotPass::createSnapshotStorageFunction() {
+    // Function that stores compressed snapshot in the stack
+    FunctionType *StoreTy = FunctionType::get(
+        Type::getVoidTy(*Context),
+        {PointerType::get(Type::getInt8Ty(*Context), 0)},  // Compressed data
+        false);
+    
+    StoreSnapshotFunc = Function::Create(StoreTy, Function::InternalLinkage, 
+                                        "__store_snapshot", M);
+    
+    BasicBlock *EntryBB = BasicBlock::Create(*Context, "entry", StoreSnapshotFunc);
+    Builder->SetInsertPoint(EntryBB);
+    
+    Value *CompressedData = StoreSnapshotFunc->getArg(0);
+    
+    // Load current stack depth
+    Value *CurrentDepth = Builder->CreateLoad(Type::getInt32Ty(*Context), StackDepthGV);
+    
+    // Check if stack is full
+    Value *MaxDepth = ConstantInt::get(Type::getInt32Ty(*Context), 1000);
+    Value *StackFull = Builder->CreateICmpUGE(CurrentDepth, MaxDepth);
+    
+    BasicBlock *StoreBB = BasicBlock::Create(*Context, "store", StoreSnapshotFunc);
+    BasicBlock *SkipBB = BasicBlock::Create(*Context, "skip", StoreSnapshotFunc);
+    
+    Builder->CreateCondBr(StackFull, SkipBB, StoreBB);
+    
+    // Store compressed data
+    Builder->SetInsertPoint(StoreBB);
+    
+    // Get pointer to stack element
+    Value *StackElementPtr = Builder->CreateGEP(
+        SnapshotStackGV->getValueType(), SnapshotStackGV,
+        {ConstantInt::get(Type::getInt32Ty(*Context), 0), CurrentDepth});
+    
+    // Copy compressed data to stack
+    Builder->CreateCall(
+        Intrinsic::getDeclaration(M, Intrinsic::memcpy, 
+                                 {Type::getInt8PtrTy(*Context), Type::getInt8PtrTy(*Context), 
+                                  Type::getInt64Ty(*Context)}),
+        {Builder->CreateBitCast(StackElementPtr, Type::getInt8PtrTy(*Context)),
+         CompressedData,
+         ConstantInt::get(Type::getInt64Ty(*Context), 4096 + 32),  // Max size
+         ConstantInt::getFalse(*Context)});
+    
+    // Increment stack depth
+    Value *NewDepth = Builder->CreateAdd(CurrentDepth, ConstantInt::get(Type::getInt32Ty(*Context), 1));
+    Builder->CreateStore(NewDepth, StackDepthGV);
+    
+    Builder->CreateBr(SkipBB);
+    
+    Builder->SetInsertPoint(SkipBB);
+    Builder->CreateRetVoid();
+}
+
+void SnapshotPass::instrumentFunction(Function &F) {
+    static int instructionCounter = 0;
+    
+    for (auto &BB : F) {
+        for (auto &I : BB) {
+            if (isa<DbgInfoIntrinsic>(&I) || isa<PHINode>(&I))
+                continue;
+                
+            if (++instructionCounter % 100 == 0) {
+                Builder->SetInsertPoint(&I);
+                
+                // Call snapshot creation function
+                auto Call = Builder->CreateCall(CreateSnapshotFunc);
+                if (auto* Inst = dyn_cast<Instruction>(Call))
+                    Inst->setMetadata("op_sig", MDNode::get(*Context, {}));
+            }
+        }
     }
 }
 
 template<typename SnapshotType>
-struct DeltaSnapshot {
-    uint64_t changed_registers_mask[2];
-    std::vector<uint8_t> compressed_data;
+void addSnapshotLogic(Function &F) {
+    Module *M = F.getParent();
+    LLVMContext &Context = M->getContext();
+    IRBuilder<> Builder(Context);
     
-    DeltaSnapshot() {
-        changed_registers_mask[0] = 0;
-        changed_registers_mask[1] = 0;
+    FunctionCallee CreateSnapshotFunc = M->getOrInsertFunction(
+        "__create_snapshot",
+        FunctionType::get(Type::getVoidTy(Context), {}, false)
+    );
+    
+    static int instructionCounter = 0;
+    
+    for (auto &BB : F) {
+        for (auto &I : BB) {
+            if (isa<DbgInfoIntrinsic>(&I) || isa<PHINode>(&I))
+                continue;
+                
+            if (++instructionCounter % 100 == 0) {
+                Builder.SetInsertPoint(&I);
+                
+                // Create register capture inline assembly call
+                Value *SnapshotPtr = createRegisterCapture<SnapshotType>(Builder, M);
+                
+                // Call __create_snapshot with captured register state
+                auto Call = Builder.CreateCall(CreateSnapshotFunc);
+                if (auto* Inst = dyn_cast<Instruction>(Call))
+                    Inst->setMetadata("op_sig", MDNode::get(Context, {}));
+            }
+        }
     }
-};
+}
+
+// Fix the createSnapshotFunction to actually get the target triple
+void createSnapshotFunction(Function &F) {
+    Module *M = F.getParent();
+    LLVMContext &Context = M->getContext();
+    Triple TargetTriple(M->getTargetTriple());  // Add this line
+
+    // Create the actual __create_snapshot function implementation
+    FunctionType *SnapshotFuncType = FunctionType::get(Type::getVoidTy(Context), {}, false);
+    Function *SnapshotFunc = Function::Create(SnapshotFuncType, Function::ExternalLinkage, "__create_snapshot", M);
+    
+    BasicBlock *EntryBB = BasicBlock::Create(Context, "entry", SnapshotFunc);
+    IRBuilder<> Builder(Context);
+    Builder.SetInsertPoint(EntryBB);
+    
+    // Add actual snapshot creation logic here
+    if (TargetTriple.getArch() == Triple::ArchType::x86_64) {
+        // Call x86 register capture
+        Builder.CreateCall(M->getOrInsertFunction("__capture_x86_state", 
+                          FunctionType::get(Type::getVoidTy(Context), {}, false)));
+    } else if (TargetTriple.getArch() == Triple::ArchType::aarch64) {
+        // Call AArch64 register capture  
+        Builder.CreateCall(M->getOrInsertFunction("__capture_aarch64_state",
+                          FunctionType::get(Type::getVoidTy(Context), {}, false)));
+    }
+    
+    Builder.CreateRetVoid();
+
+    // Now instrument the function based on architecture
+    if (TargetTriple.getArch() == Triple::ArchType::x86_64) {
+        addSnapshotLogic<SnapshotX86>(F);
+    } else if (TargetTriple.getArch() == Triple::ArchType::aarch64) {
+        addSnapshotLogic<SnapshotAArch64>(F);
+    }
+}
+
+
+// Actually create the missing struct types in LLVM IR
+template<typename SnapshotType>
+StructType* createSnapshotType(LLVMContext &Context) {
+    if constexpr (std::is_same_v<SnapshotType, SnapshotX86>) {
+        Type *I64Ty = Type::getInt64Ty(Context);
+        Type *I16Ty = Type::getInt16Ty(Context);
+        
+        std::vector<Type*> fields;
+        // Base fields: fuel, runtime_sig, memory_usage, instruction_count
+        fields.insert(fields.end(), 4, I64Ty);
+        // GPRs: rax, rbx, rcx, rdx, rsi, rdi, rsp, rbp, r8-r15
+        fields.insert(fields.end(), 16, I64Ty);
+        // RFLAGS
+        fields.push_back(I64Ty);
+        // XMM registers (16 * 128-bit = 16 * 2 * 64-bit)
+        fields.insert(fields.end(), 32, I64Ty);
+        // YMM upper (16 * 128-bit = 16 * 2 * 64-bit)  
+        fields.insert(fields.end(), 32, I64Ty);
+        // Segment registers
+        fields.insert(fields.end(), 6, I16Ty);
+        // Control registers
+        fields.insert(fields.end(), 4, I64Ty);
+        
+        return StructType::create(Context, fields, "struct.SnapshotX86");
+    } else if constexpr (std::is_same_v<SnapshotType, SnapshotAArch64>) {
+        Type *I64Ty = Type::getInt64Ty(Context);
+        
+        std::vector<Type*> fields;
+        // Base fields: fuel, runtime_sig, memory_usage, instruction_count
+        fields.insert(fields.end(), 4, I64Ty);
+        // X0-X30 registers
+        fields.insert(fields.end(), 31, I64Ty);
+        // SP register
+        fields.push_back(I64Ty);
+        // V0-V31 vector registers (32 * 128-bit = 32 * 2 * 64-bit)
+        fields.insert(fields.end(), 64, I64Ty);
+        // System registers: nzcv, fpcr, fpsr, tpidr_el0, tpidrro_el0
+        fields.insert(fields.end(), 5, I64Ty);
+        
+        return StructType::create(Context, fields, "struct.SnapshotAArch64");
+    }
+}
 
 template<typename SnapshotType>
-class SnapshotDeltaCompressor {
-private:
-    static void setBit(DeltaSnapshot<SnapshotType>& delta, uint8_t bit) {
-        uint8_t idx = bit / 64;
-        uint8_t pos = bit % 64;
-        delta.changed_registers_mask[idx] |= (1ULL << pos);
+Value* createRegisterCapture(IRBuilder<> &Builder, Module *M) {
+    LLVMContext &Context = M->getContext();
+    
+    // Create the appropriate snapshot type
+    StructType *SnapshotTy = createSnapshotType<SnapshotType>(Context);
+    Value *SnapshotPtr = Builder.CreateAlloca(SnapshotTy);
+    
+    if constexpr (std::is_same_v<SnapshotType, SnapshotX86>) {
+        captureX86Registers(Builder, M, SnapshotPtr);
+    } else if constexpr (std::is_same_v<SnapshotType, SnapshotAArch64>) {
+        captureAArch64Registers(Builder, M, SnapshotPtr);
     }
     
-    static void appendData(DeltaSnapshot<SnapshotType>& delta, const void* data, size_t size) {
-        size_t current_size = delta.compressed_data.size();
-        delta.compressed_data.resize(current_size + size);
-        std::memcpy(delta.compressed_data.data() + current_size, data, size);
-    }
-    
-    static DeltaSnapshot<SnapshotX86> createDeltaX86(const SnapshotX86& old_snap, const SnapshotX86& new_snap) {
-        DeltaSnapshot<SnapshotX86> delta;
-        
-        if (std::memcmp(&old_snap.fuel, &new_snap.fuel, sizeof(Snapshot)) != 0) {
-            setBit(delta, RegisterMasks::X86::BASE_FIELDS);
-            appendData(delta, &new_snap.fuel, sizeof(Snapshot));
-        }
-        
-        const uint64_t* old_gprs = &old_snap.rax;
-        const uint64_t* new_gprs = &new_snap.rax;
-        for (uint8_t idx = 0; idx < 16; ++idx) {
-            if (old_gprs[idx] != new_gprs[idx]) {
-                setBit(delta, RegisterMasks::X86::RAX + idx);
-                appendData(delta, &new_gprs[idx], sizeof(uint64_t));
-            }
-        }
-        
-        if (old_snap.rflags != new_snap.rflags) {
-            setBit(delta, RegisterMasks::X86::RFLAGS);
-            appendData(delta, &new_snap.rflags, sizeof(uint64_t));
-        }
-        
-        for (uint8_t idx = 0; idx < 16; ++idx) {
-            if (std::memcmp(&old_snap.xmm[idx], &new_snap.xmm[idx], 16) != 0) {
-                setBit(delta, RegisterMasks::X86::XMM0 + idx);
-                appendData(delta, &new_snap.xmm[idx], 16);
-            }
-        }
-        
-        for (uint8_t idx = 0; idx < 16; ++idx) {
-            if (std::memcmp(&old_snap.ymm_upper[idx], &new_snap.ymm_upper[idx], 16) != 0) {
-                setBit(delta, RegisterMasks::X86::YMM0_UPPER + idx);
-                appendData(delta, &new_snap.ymm_upper[idx], 16);
-            }
-        }
-        
-        if (std::memcmp(&old_snap.cs, &new_snap.cs, 12) != 0) {
-            setBit(delta, RegisterMasks::X86::SEGMENTS);
-            appendData(delta, &new_snap.cs, 12);
-        }
-        
-        const uint64_t* old_crs = &old_snap.cr0;
-        const uint64_t* new_crs = &new_snap.cr0;
-        for (uint8_t idx = 0; idx < 4; ++idx) {
-            if (old_crs[idx] != new_crs[idx]) {
-                setBit(delta, RegisterMasks::X86::CR0 + idx);
-                appendData(delta, &new_crs[idx], sizeof(uint64_t));
-            }
-        }
-        
-        const uint64_t* old_msrs = &old_snap.msr_efer;
-        const uint64_t* new_msrs = &new_snap.msr_efer;
-        for (uint8_t idx = 0; idx < 3; ++idx) {
-            if (old_msrs[idx] != new_msrs[idx]) {
-                setBit(delta, RegisterMasks::X86::MSR_EFER + idx);
-                appendData(delta, &new_msrs[idx], sizeof(uint64_t));
-            }
-        }
-        
-        for (uint8_t idx = 0; idx < 32; ++idx) {
-            if (std::memcmp(&old_snap.zmm_upper[idx], &new_snap.zmm_upper[idx], 32) != 0) {
-                setBit(delta, RegisterMasks::X86::ZMM_START);
-                appendData(delta, &idx, 1);
-                appendData(delta, &new_snap.zmm_upper[idx], 32);
-            }
-        }
-        
-        return delta;
-    }
-    
-    static DeltaSnapshot<SnapshotAArch64> createDeltaAArch64(const SnapshotAArch64& old_snap, const SnapshotAArch64& new_snap) {
-        DeltaSnapshot<SnapshotAArch64> delta;
-        
-        if (std::memcmp(&old_snap.fuel, &new_snap.fuel, sizeof(Snapshot)) != 0) {
-            setBit(delta, RegisterMasks::AArch64::BASE_FIELDS);
-            appendData(delta, &new_snap.fuel, sizeof(Snapshot));
-        }
-        
-        for (uint8_t idx = 0; idx < 31; ++idx) {
-            if (old_snap.x[idx] != new_snap.x[idx]) {
-                setBit(delta, RegisterMasks::AArch64::X0 + idx);
-                appendData(delta, &new_snap.x[idx], sizeof(uint64_t));
-            }
-        }
-        
-        if (old_snap.sp != new_snap.sp) {
-            setBit(delta, RegisterMasks::AArch64::SP);
-            appendData(delta, &new_snap.sp, sizeof(uint64_t));
-        }
-        
-        for (uint8_t idx = 0; idx < 32; ++idx) {
-            if (std::memcmp(&old_snap.v[idx], &new_snap.v[idx], 16) != 0) {
-                setBit(delta, RegisterMasks::AArch64::V0 + idx);
-                appendData(delta, &new_snap.v[idx], 16);
-            }
-        }
-        
-        const uint64_t* old_sys = &old_snap.nzcv;
-        const uint64_t* new_sys = &new_snap.nzcv;
-        for (uint8_t idx = 0; idx < 10; ++idx) {
-            if (old_sys[idx] != new_sys[idx]) {
-                setBit(delta, RegisterMasks::AArch64::NZCV + idx);
-                appendData(delta, &new_sys[idx], sizeof(uint64_t));
-            }
-        }
-        
-        return delta;
-    }
-    
-public:
-    static DeltaSnapshot<SnapshotType> createDelta(const SnapshotType& old_snapshot, const SnapshotType& new_snapshot) {
-        if constexpr (std::is_same_v<SnapshotType, SnapshotX86>) {
-            return createDeltaX86(old_snapshot, new_snapshot);
-        } else if constexpr (std::is_same_v<SnapshotType, SnapshotAArch64>) {
-            return createDeltaAArch64(old_snapshot, new_snapshot);
-        }
-    }
-    
-    static SnapshotType applyDelta(const SnapshotType& base_snapshot, const DeltaSnapshot<SnapshotType>& delta) {
-        if constexpr (std::is_same_v<SnapshotType, SnapshotX86>) {
-            return applyDeltaX86(base_snapshot, delta);
-        } else if constexpr (std::is_same_v<SnapshotType, SnapshotAArch64>) {
-            return applyDeltaAArch64(base_snapshot, delta);
-        }
-    }
-    
-private:
-    static SnapshotX86 applyDeltaX86(const SnapshotX86& base, const DeltaSnapshot<SnapshotX86>& delta) {
-        SnapshotX86 result = base;
-        size_t data_offset = 0;
-        
-        auto checkBit = [&](uint8_t bit) -> bool {
-            uint8_t idx = bit / 64;
-            uint8_t pos = bit % 64;
-            return delta.changed_registers_mask[idx] & (1ULL << pos);
-        };
-        
-        auto readData = [&](void* dest, size_t size) {
-            std::memcpy(dest, delta.compressed_data.data() + data_offset, size);
-            data_offset += size;
-        };
-        
-        if (checkBit(RegisterMasks::X86::BASE_FIELDS)) {
-            readData(&result.fuel, sizeof(Snapshot));
-        }
-        
-        uint64_t* gprs = &result.rax;
-        for (uint8_t idx = 0; idx < 16; ++idx) {
-            if (checkBit(RegisterMasks::X86::RAX + idx)) {
-                readData(&gprs[idx], sizeof(uint64_t));
-            }
-        }
-        
-        if (checkBit(RegisterMasks::X86::RFLAGS)) {
-            readData(&result.rflags, sizeof(uint64_t));
-        }
-        
-        for (uint8_t idx = 0; idx < 16; ++idx) {
-            if (checkBit(RegisterMasks::X86::XMM0 + idx)) {
-                readData(&result.xmm[idx], 16);
-            }
-        }
-        
-        for (uint8_t idx = 0; idx < 16; ++idx) {
-            if (checkBit(RegisterMasks::X86::YMM0_UPPER + idx)) {
-                readData(&result.ymm_upper[idx], 16);
-            }
-        }
-        
-        if (checkBit(RegisterMasks::X86::SEGMENTS)) {
-            readData(&result.cs, 12);
-        }
-        
-        uint64_t* crs = &result.cr0;
-        for (uint8_t idx = 0; idx < 4; ++idx) {
-            if (checkBit(RegisterMasks::X86::CR0 + idx)) {
-                readData(&crs[idx], sizeof(uint64_t));
-            }
-        }
-        
-        uint64_t* msrs = &result.msr_efer;
-        for (uint8_t idx = 0; idx < 3; ++idx) {
-            if (checkBit(RegisterMasks::X86::MSR_EFER + idx)) {
-                readData(&msrs[idx], sizeof(uint64_t));
-            }
-        }
-        
-        if (checkBit(RegisterMasks::X86::ZMM_START)) {
-            while (data_offset < delta.compressed_data.size()) {
-                uint8_t zmm_idx;
-                readData(&zmm_idx, 1);
-                if (zmm_idx < 32) {
-                    readData(&result.zmm_upper[zmm_idx], 32);
-                }
-            }
-        }
-        
-        return result;
-    }
-    
-    static SnapshotAArch64 applyDeltaAArch64(const SnapshotAArch64& base, const DeltaSnapshot<SnapshotAArch64>& delta) {
-        SnapshotAArch64 result = base;
-        size_t data_offset = 0;
-        
-        auto checkBit = [&](uint8_t bit) -> bool {
-            uint8_t idx = bit / 64;
-            uint8_t pos = bit % 64;
-            return delta.changed_registers_mask[idx] & (1ULL << pos);
-        };
-        
-        auto readData = [&](void* dest, size_t size) {
-            std::memcpy(dest, delta.compressed_data.data() + data_offset, size);
-            data_offset += size;
-        };
-        
-        if (checkBit(RegisterMasks::AArch64::BASE_FIELDS)) {
-            readData(&result.fuel, sizeof(Snapshot));
-        }
-        
-        for (uint8_t idx = 0; idx < 31; ++idx) {
-            if (checkBit(RegisterMasks::AArch64::X0 + idx)) {
-                readData(&result.x[idx], sizeof(uint64_t));
-            }
-        }
-        
-        if (checkBit(RegisterMasks::AArch64::SP)) {
-            readData(&result.sp, sizeof(uint64_t));
-        }
-        
-        for (uint8_t idx = 0; idx < 32; ++idx) {
-            if (checkBit(RegisterMasks::AArch64::V0 + idx)) {
-                readData(&result.v[idx], 16);
-            }
-        }
-        
-        uint64_t* sys_regs = &result.nzcv;
-        for (uint8_t idx = 0; idx < 10; ++idx) {
-            if (checkBit(RegisterMasks::AArch64::NZCV + idx)) {
-                readData(&sys_regs[idx], sizeof(uint64_t));
-            }
-        }
-        
-        return result;
-    }
-    
-public:
-    static double getCompressionRatio(const DeltaSnapshot<SnapshotType>& delta) {
-        size_t compressed_size = delta.compressed_data.size() + 16;
-        return static_cast<double>(sizeof(SnapshotType)) / compressed_size;
-    }
-    
-    static size_t getChangedRegisterCount(const DeltaSnapshot<SnapshotType>& delta) {
-        return __builtin_popcountll(delta.changed_registers_mask[0]) + 
-               __builtin_popcountll(delta.changed_registers_mask[1]);
-    }
-};
+    return SnapshotPtr;
+}
 
-using DeltaSnapshotX86 = DeltaSnapshot<SnapshotX86>;
-using DeltaSnapshotAArch64 = DeltaSnapshot<SnapshotAArch64>;
-using CompressorX86 = SnapshotDeltaCompressor<SnapshotX86>;
-using CompressorAArch64 = SnapshotDeltaCompressor<SnapshotAArch64>;
+// Fix the X86 register capture to use proper struct GEP
+void captureX86Registers(IRBuilder<> &Builder, Module *M, Value *SnapshotPtr) {
+    LLVMContext &Context = M->getContext();
+    Type *I64Ty = Type::getInt64Ty(Context);
+    StructType *SnapshotTy = cast<StructType>(SnapshotPtr->getType()->getPointerElementType());
+    
+    // Capture GPRs using inline assembly
+    FunctionType *AsmFuncType = FunctionType::get(Type::getVoidTy(Context), {}, false);
+    std::string AsmString = 
+        "movq %%rax, 32(%0)\n\t"   // offset 4*8 = 32 (after base fields)
+        "movq %%rbx, 40(%0)\n\t"
+        "movq %%rcx, 48(%0)\n\t"
+        "movq %%rdx, 56(%0)\n\t"
+        "movq %%rsi, 64(%0)\n\t"
+        "movq %%rdi, 72(%0)\n\t"
+        "movq %%rsp, 80(%0)\n\t"
+        "movq %%rbp, 88(%0)\n\t"
+        "movq %%r8, 96(%0)\n\t"
+        "movq %%r9, 104(%0)\n\t"
+        "movq %%r10, 112(%0)\n\t"
+        "movq %%r11, 120(%0)\n\t"
+        "movq %%r12, 128(%0)\n\t"
+        "movq %%r13, 136(%0)\n\t"
+        "movq %%r14, 144(%0)\n\t"
+        "movq %%r15, 152(%0)";
+    
+    std::string Constraints = "r";
+    
+    InlineAsm *IA = InlineAsm::get(AsmFuncType, AsmString, Constraints, true);
+    Builder.CreateCall(IA, {SnapshotPtr});
+    
+    // Capture RFLAGS
+    std::string RFlagsAsm = "pushfq\n\tpopq 160(%0)";  // offset after GPRs
+    InlineAsm *RFlagsIA = InlineAsm::get(AsmFuncType, RFlagsAsm, Constraints, true);
+    Builder.CreateCall(RFlagsIA, {SnapshotPtr});
+}
 
-template<typename SnapshotType>
-class SnapshotStack {
-private:
-    SnapshotType base_snapshot;
-    std::vector<DeltaSnapshot<SnapshotType>> delta_stack;
-    bool has_base;
+// Fix the AArch64 register capture 
+void captureAArch64Registers(IRBuilder<> &Builder, Module *M, Value *SnapshotPtr) {
+    LLVMContext &Context = M->getContext();
+    Type *I64Ty = Type::getInt64Ty(Context);
     
-public:
-    SnapshotStack() : has_base(false) {}
+    FunctionType *AsmFuncType = FunctionType::get(Type::getVoidTy(Context), {}, false);
+    std::string AsmString = "";
     
-    void pushSnapshot(const SnapshotType& snapshot) {
-        if (!has_base) {
-            base_snapshot = snapshot;
-            has_base = true;
-        } else {
-            SnapshotType current = getCurrentSnapshot();
-            auto delta = SnapshotDeltaCompressor<SnapshotType>::createDelta(current, snapshot);
-            delta_stack.push_back(std::move(delta));
-        }
+    // Capture X0-X30
+    for (int i = 0; i < 31; i++) {
+        int offset = 32 + (i * 8);  // 32 bytes for base fields + i*8
+        AsmString += "str x" + std::to_string(i) + ", " + std::to_string(offset) + "(%0)\n\t";
     }
     
-    bool popSnapshot() {
-        if (delta_stack.empty()) {
-            if (has_base) {
-                has_base = false;
-                return true;
-            }
-            return false;
-        }
-        delta_stack.pop_back();
-        return true;
-    }
+    // Capture SP
+    AsmString += "mov x30, sp\n\tstr x30, 280(%0)";  // 32 + 31*8 = 280
     
-    SnapshotType getCurrentSnapshot() const {
-        if (!has_base) {
-            return SnapshotType{};
-        }
-        SnapshotType current = base_snapshot;
-        for (const auto& delta : delta_stack) {
-            current = SnapshotDeltaCompressor<SnapshotType>::applyDelta(current, delta);
-        }
-        return current;
-    }
+    std::string Constraints = "r";
     
-    size_t getDepth() const {
-        return delta_stack.size() + (has_base ? 1 : 0);
-    }
-    
-    size_t getTotalMemoryUsage() const {
-        size_t total = has_base ? sizeof(SnapshotType) : 0;
-        for (const auto& delta : delta_stack) {
-            total += delta.compressed_data.size() + 16;
-        }
-        return total;
-    }
-    
-    struct CompressionStats {
-        size_t total_snapshots;
-        size_t uncompressed_size;
-        size_t compressed_size;
-        double average_compression_ratio;
-        size_t average_changed_registers;
-    };
-    
-    CompressionStats getCompressionStats() const {
-        CompressionStats stats = {};
-        stats.total_snapshots = getDepth();
-        stats.uncompressed_size = stats.total_snapshots * sizeof(SnapshotType);
-        
-        if (has_base) {
-            stats.compressed_size += sizeof(SnapshotType);
-        }
-        
-        double total_ratio = 0.0;
-        size_t total_changed = 0;
-        
-        for (const auto& delta : delta_stack) {
-            stats.compressed_size += delta.compressed_data.size() + 16;
-            total_ratio += SnapshotDeltaCompressor<SnapshotType>::getCompressionRatio(delta);
-            total_changed += SnapshotDeltaCompressor<SnapshotType>::getChangedRegisterCount(delta);
-        }
-        
-        if (!delta_stack.empty()) {
-            stats.average_compression_ratio = total_ratio / delta_stack.size();
-            stats.average_changed_registers = total_changed / delta_stack.size();
-        }
-        
-        return stats;
-    }
-};
+    InlineAsm *IA = InlineAsm::get(AsmFuncType, AsmString, Constraints, true);
+    Builder.CreateCall(IA, {SnapshotPtr});
+}
 
-using SnapshotStackX86 = SnapshotStack<SnapshotX86>;
-using SnapshotStackAArch64 = SnapshotStack<SnapshotAArch64>;
+// Remove the duplicate function definitions and add the missing ones
+void captureRFlags(IRBuilder<> &Builder, Module *M, Value *SnapshotPtr) {
+    // This is now integrated into captureX86Registers
+}
+
+void captureXMMRegisters(IRBuilder<> &Builder, Module *M, Value *SnapshotPtr) {
+    // This can be added later for full XMM support
+}
+
+void captureSP(IRBuilder<> &Builder, Module *M, Value *SnapshotPtr) {
+    // This is now integrated into captureAArch64Registers  
+}
+
+void captureVectorRegisters(IRBuilder<> &Builder, Module *M, Value *SnapshotPtr) {
+    // This can be added later for full vector register support
+}
+
+void captureSystemRegisters(IRBuilder<> &Builder, Module *M, Value *SnapshotPtr) {
+    // This can be added later for full system register support
+}
