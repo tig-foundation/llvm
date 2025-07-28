@@ -31,6 +31,7 @@ using namespace llvm;
 #include "aarch64.h"
 #include "rust.h"
 #include "constants.h"
+#include "snapshot.h"
 
 static bool isInstructionSafe(const Instruction &I)
 {
