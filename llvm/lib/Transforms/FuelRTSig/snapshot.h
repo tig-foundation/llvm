@@ -34,3 +34,25 @@ struct BBSnapshot {
     BBModifiedRegisters registers;
 };
 
+BBSnapshot snapshotInstrumentBB(Module *mod, Function *func, BasicBlock *bb, IRBuilder<> &builder)
+{
+    BBSnapshot snapshot;
+    for (Instruction &inst : *bb) {
+        for (unsigned i = 0; i < inst.getNumOperands(); i++) {
+            auto op = inst.getOperand(i);
+            if(!op->isDef() || op->isImplicit()){
+                continue;
+            }
+
+            if (Register reg = op->getReg()) {
+                snapshot.registers.registers.push_back(0);
+            }
+
+            if (MemoryAccess *mem = op->getMemoryAccess()) {
+                snapshot.memory.addresses.push_back(0);
+            }
+        }
+    }
+
+    return snapshot;
+}
