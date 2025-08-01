@@ -12,18 +12,19 @@
 #include <cstdint>
 #include <vector>
 #include <optional>
+#include <tuple>
 
 struct BBModifiedMemory {
     BBModifiedMemory() : addresses(), values() {}
 
-    std::vector<uint64_t> addresses;
+    std::vector<std::tuple<uint16_t, uint64_t>> addresses; // (instr_idx, address)
     std::vector<std::optional<uint64_t>> values;
 };
 
 struct BBModifiedRegisters {
     BBModifiedRegisters() : registers(), values() {}
 
-    std::vector<uint16_t> registers;
+    std::vector<std::tuple<uint16_t, uint16_t>> registers; // (instr_idx, reg_idx)
     std::vector<std::optional<uint64_t>> values;
 };
 
@@ -37,21 +38,26 @@ struct BBSnapshot {
 BBSnapshot snapshotInstrumentBB(Module *mod, Function *func, BasicBlock *bb, IRBuilder<> &builder)
 {
     BBSnapshot snapshot;
+    uint16_t instr_idx = 0;
     for (Instruction &inst : *bb) {
         for (unsigned i = 0; i < inst.getNumOperands(); i++) {
             auto op = inst.getOperand(i);
-            if(!op->isDef() || op->isImplicit()){
-                continue;
-            }
-
             if (Register reg = op->getReg()) {
-                snapshot.registers.registers.push_back(0);
+                if(!op->isDef() || op->isImplicit()){
+                    continue;
+                }
+
+                snapshot.registers.registers.push_back(std::make_tuple(instr_idx, i));
             }
 
             if (MemoryAccess *mem = op->getMemoryAccess()) {
-                snapshot.memory.addresses.push_back(0);
+                if (mem->isWrite()) {
+                    snapshot.memory.addresses.push_back(std::make_tuple(instr_idx, 0));
+                }
             }
         }
+
+        instr_idx++;
     }
 
     return snapshot;
