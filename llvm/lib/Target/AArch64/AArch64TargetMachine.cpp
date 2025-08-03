@@ -264,6 +264,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAArch64Target() {
   initializeAArch64LowerHomogeneousPrologEpilogPass(*PR);
   initializeAArch64DAGToDAGISelLegacyPass(*PR);
   initializeAArch64GlobalsTaggingPass(*PR);
+  //initializeAArch64TracerPass(*PR);
 }
 
 //===----------------------------------------------------------------------===//
@@ -854,6 +855,8 @@ void AArch64PassConfig::addPreEmitPass() {
     // Identify valid eh continuation targets for Windows EHCont Guard.
     addPass(createEHContGuardCatchretPass());
   }
+
+  addPass(createAArch64TracerPass());
 
   if (TM->getOptLevel() != CodeGenOptLevel::None && EnableCollectLOH &&
       TM->getTargetTriple().isOSBinFormatMachO())
