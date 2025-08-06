@@ -474,6 +474,8 @@ void AArch64Tracer::instrumentMemoryModification(
     if (size == 0) return;
 
     instrumentStore(MBB, MBBI, MI, TII, LogMemWriteFn, size);*/
+
+    dbgs() << "Memory instrumented" << std::endl;
 }
 
 void AArch64Tracer::instrumentStackModification(
@@ -494,6 +496,8 @@ void AArch64Tracer::instrumentStackModification(
     if (size == 0) return;
 
     instrumentStore(MBB, MBBI, MI, TII, LogStackWriteFn, size);*/
+
+    dbgs() << "Stack instrumented" << std::endl;
 }
 
 void AArch64Tracer::instrumentRegisterModification(
@@ -514,6 +518,8 @@ void AArch64Tracer::instrumentRegisterModification(
     unsigned MovOpc = AArch64::GPR64RegClass.contains(Reg) ? AArch64::ORRXrs : AArch64::ORRWrs;
     BuildMI(MBB, MBBI, DL, TII->get(MovOpc), AArch64::X1).addReg(AArch64::GPR64RegClass.contains(Reg) ? AArch64::XZR : AArch64::WZR).addReg(Reg).addImm(0);
     BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogRegWriteFn.getCallee());*/
+
+    dbgs() << "Register instrumented" << std::endl;
 }
 
 void AArch64Tracer::instrumentCall(
@@ -528,6 +534,8 @@ void AArch64Tracer::instrumentCall(
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::MOVaddr), AArch64::X0).add(MI.getOperand(0));
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogCallFn.getCallee());
     }*/
+
+    dbgs() << "Call instrumented" << std::endl;
 }
 
 void AArch64Tracer::instrumentBranch(
@@ -542,6 +550,8 @@ void AArch64Tracer::instrumentBranch(
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::MOVi64), AArch64::X0).addImm(0);
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogBranchFn.getCallee());
     }*/
+
+    dbgs() << "Branch instrumented" << std::endl;
 }
 
 
