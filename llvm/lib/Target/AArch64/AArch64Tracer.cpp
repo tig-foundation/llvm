@@ -440,7 +440,7 @@ void AArch64Tracer::instrumentStore(
   FunctionCallee &LogFn, 
   uint32_t size
 ) {
-    DebugLoc DL = MI.getDebugLoc();
+    /*DebugLoc DL = MI.getDebugLoc();
     if (MI.getNumOperands() < 3 || !MI.getOperand(0).isReg() || !MI.getOperand(1).isReg() || !MI.getOperand(2).isImm()) {
         return;
     }
@@ -453,7 +453,7 @@ void AArch64Tracer::instrumentStore(
     unsigned MovOpc = AArch64::GPR64RegClass.contains(ValReg) ? AArch64::ORRXrs : AArch64::ORRWrs;
     BuildMI(MBB, MBBI, DL, TII->get(MovOpc), AArch64::X1).addReg(AArch64::GPR64RegClass.contains(ValReg) ? AArch64::XZR : AArch64::WZR).addReg(ValReg).addImm(0);
     BuildMI(MBB, MBBI, DL, TII->get(AArch64::MOVi64), AArch64::X2).addImm(size);
-    BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogFn.getCallee());
+    BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogFn.getCallee());*/
 }
 
 void AArch64Tracer::instrumentMemoryModification(
