@@ -361,15 +361,15 @@ bool AArch64Tracer::runOnMachineFunction(MachineFunction &MF) {
 
   LLVMContext &Ctx = M->getContext();
   Type *VoidTy = Type::getVoidTy(Ctx);
-  Type *Int8PtrTy = Type::getInt8PtrTy(Ctx);
+  Type *Int8PtrTy = Type::getInt8Ty(Ctx)->getPointerTo();
   Type *Int64Ty = Type::getInt64Ty(Ctx);
   Type *Int32Ty = Type::getInt32Ty(Ctx);
 
-  LogMemWriteFn = M->getOrInsertFunction("_checkpoint_log_mem_write", VoidTy, Int8PtrTy, Int64Ty, Int32Ty);
-  LogStackWriteFn = M->getOrInsertFunction("_checkpoint_log_stack_write", VoidTy, Int8PtrTy, Int64Ty, Int32Ty);
-  LogRegWriteFn = M->getOrInsertFunction("_checkpoint_log_reg_write", VoidTy, Int32Ty, Int64Ty);
-  LogCallFn = M->getOrInsertFunction("_checkpoint_log_call", VoidTy, Int8PtrTy);
-  LogBranchFn = M->getOrInsertFunction("_checkpoint_log_branch", VoidTy, Int8PtrTy);
+  //LogMemWriteFn = M->getOrInsertFunction("_checkpoint_log_mem_write", VoidTy, Int8PtrTy, Int64Ty, Int32Ty);
+  //LogStackWriteFn = M->getOrInsertFunction("_checkpoint_log_stack_write", VoidTy, Int8PtrTy, Int64Ty, Int32Ty);
+  //LogRegWriteFn = M->getOrInsertFunction("_checkpoint_log_reg_write", VoidTy, Int32Ty, Int64Ty);
+  //LogCallFn = M->getOrInsertFunction("_checkpoint_log_call", VoidTy, Int8PtrTy);
+  //LogBranchFn = M->getOrInsertFunction("_checkpoint_log_branch", VoidTy, Int8PtrTy);
 
   for (auto &MBB : MF) {
     for (auto MBBI = MBB.begin(), E = MBB.end(); MBBI != E; ++MBBI) {
@@ -385,11 +385,12 @@ bool AArch64Tracer::runOnMachineFunction(MachineFunction &MF) {
         Changed = true;
       }
 
-      for (const auto &Op : MI.defs()) {
-          if (Op.isReg() && !Op.isImplicit()) {
-              instrumentRegisterModification(MBB, std::next(MBBI), MI.getOperand(MI.getOperandNo(&Op)), TII);
-              Changed = true;
-          }
+      for (unsigned opIdx = 0; opIdx < MI.getNumOperands(); ++opIdx) {
+        MachineOperand &Op = MI.getOperand(opIdx);
+        if (Op.isDef() && Op.isReg() && !Op.isImplicit()) {
+          instrumentRegisterModification(MBB, std::next(MBBI), Op, TII);
+          Changed = true;
+        }
       }
 
       if (MI.mayStore()) {
