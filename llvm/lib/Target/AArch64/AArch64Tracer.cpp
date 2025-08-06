@@ -314,29 +314,28 @@ namespace {
 
 class AArch64Tracer : public MachineFunctionPass {
 public:
-  static char ID;
+    static char ID;
 
-  AArch64Tracer() : MachineFunctionPass(ID) {
-    initializeAArch64TracerPass(*PassRegistry::getPassRegistry());
-  }
+    AArch64Tracer() : MachineFunctionPass(ID) {
+      initializeAArch64TracerPass(*PassRegistry::getPassRegistry());
+    }
 
-  bool runOnMachineFunction(MachineFunction &MF) override;
+    bool runOnMachineFunction(MachineFunction &MF) override;
 
-  StringRef getPassName() const override { return "AArch64 Tracer"; }
-
+    StringRef getPassName() const override { return "AArch64 Tracer"; }
 private:
-  void instrumentRegisterModification(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineOperand &Op, const TargetInstrInfo *TII);
-  void instrumentMemoryModification(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, std::variant<MachineOperand*, MachineMemOperand*> Op, const TargetInstrInfo *TII);
-  void instrumentStackModification(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, std::variant<MachineOperand*, MachineMemOperand*> Op, const TargetInstrInfo *TII);
-  void instrumentCall(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, const TargetInstrInfo *TII);
-  void instrumentBranch(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, const TargetInstrInfo *TII);
-  void instrumentStore(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, const TargetInstrInfo *TII, FunctionCallee &LogFn, uint32_t size);
+    void instrumentRegisterModification(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineOperand &Op, const TargetInstrInfo *TII);
+    void instrumentMemoryModification(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, std::variant<MachineOperand*, MachineMemOperand*> Op, const TargetInstrInfo *TII);
+    void instrumentStackModification(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, std::variant<MachineOperand*, MachineMemOperand*> Op, const TargetInstrInfo *TII);
+    void instrumentCall(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, const TargetInstrInfo *TII);
+    void instrumentBranch(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, const TargetInstrInfo *TII);
+    void instrumentStore(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, const TargetInstrInfo *TII, FunctionCallee &LogFn, uint32_t size);
 
-  FunctionCallee LogMemWriteFn;
-  FunctionCallee LogStackWriteFn;
-  FunctionCallee LogRegWriteFn;
-  FunctionCallee LogCallFn;
-  FunctionCallee LogBranchFn;
+    FunctionCallee LogMemWriteFn;
+    FunctionCallee LogStackWriteFn;
+    FunctionCallee LogRegWriteFn;
+    FunctionCallee LogCallFn;
+    FunctionCallee LogBranchFn;
 };
 }
 
@@ -356,82 +355,79 @@ static uint32_t getRegSize(unsigned Reg) {
 }
 
 bool AArch64Tracer::runOnMachineFunction(MachineFunction &MF) {
-  bool Changed = false;
-  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
-  auto M = MF.getMMI().getModule();
+    bool Changed = false;
+    const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+    auto M = MF.getMMI().getModule();
 
-  LLVMContext &Ctx = M->getContext();
-  Type *VoidTy = Type::getVoidTy(Ctx);
-  Type *Int8PtrTy = Type::getInt8Ty(Ctx)->getPointerTo();
-  Type *Int64Ty = Type::getInt64Ty(Ctx);
-  Type *Int32Ty = Type::getInt32Ty(Ctx);
+    LLVMContext &Ctx = M->getContext();
+    Type *VoidTy = Type::getVoidTy(Ctx);
+    Type *Int8PtrTy = Type::getInt8Ty(Ctx)->getPointerTo();
+    Type *Int64Ty = Type::getInt64Ty(Ctx);
+    Type *Int32Ty = Type::getInt32Ty(Ctx);
 
-  //LogMemWriteFn = M->getOrInsertFunction("_checkpoint_log_mem_write", VoidTy, Int8PtrTy, Int64Ty, Int32Ty);
-  //LogStackWriteFn = M->getOrInsertFunction("_checkpoint_log_stack_write", VoidTy, Int8PtrTy, Int64Ty, Int32Ty);
-  //LogRegWriteFn = M->getOrInsertFunction("_checkpoint_log_reg_write", VoidTy, Int32Ty, Int64Ty);
-  //LogCallFn = M->getOrInsertFunction("_checkpoint_log_call", VoidTy, Int8PtrTy);
-  //LogBranchFn = M->getOrInsertFunction("_checkpoint_log_branch", VoidTy, Int8PtrTy);
+    //LogMemWriteFn = M->getOrInsertFunction("_checkpoint_log_mem_write", VoidTy, Int8PtrTy, Int64Ty, Int32Ty);
+    //LogStackWriteFn = M->getOrInsertFunction("_checkpoint_log_stack_write", VoidTy, Int8PtrTy, Int64Ty, Int32Ty);
+    //LogRegWriteFn = M->getOrInsertFunction("_checkpoint_log_reg_write", VoidTy, Int32Ty, Int64Ty);
+    //LogCallFn = M->getOrInsertFunction("_checkpoint_log_call", VoidTy, Int8PtrTy);
+    //LogBranchFn = M->getOrInsertFunction("_checkpoint_log_branch", VoidTy, Int8PtrTy);
 
-  for (auto &MBB : MF) {
-    for (auto MBBI = MBB.begin(), E = MBB.end(); MBBI != E; ++MBBI) {
-      MachineInstr &MI = *MBBI;
+    for (auto &MBB : MF) {
+        for (auto MBBI = MBB.begin(), E = MBB.end(); MBBI != E; ++MBBI) {
+            MachineInstr &MI = *MBBI;
 
-      if (MI.isCall()) {
-        instrumentCall(MBB, MBBI, TII);
-        Changed = true;
-        continue;
-      }
-      if (MI.isBranch()) {
-        instrumentBranch(MBB, MBBI, TII);
-        Changed = true;
-      }
+            if (MI.isCall()) {
+                instrumentCall(MBB, MBBI, TII);
+                Changed = true;
+                continue;
+            }
 
-      for (unsigned opIdx = 0; opIdx < MI.getNumOperands(); ++opIdx) {
-        MachineOperand &Op = MI.getOperand(opIdx);
-        if (Op.isDef() && Op.isReg() && !Op.isImplicit()) {
-          instrumentRegisterModification(MBB, std::next(MBBI), Op, TII);
-          Changed = true;
+            if (MI.isBranch()) {
+                instrumentBranch(MBB, MBBI, TII);
+                Changed = true;
+                continue;
+            }
+
+            for (unsigned opIdx = 0; opIdx < MI.getNumOperands(); ++opIdx) {
+                MachineOperand &Op = MI.getOperand(opIdx);
+                if (Op.isDef() && Op.isReg() && !Op.isImplicit()) {
+                    instrumentRegisterModification(MBB, std::next(MBBI), Op, TII);
+                    Changed = true;
+                }
+            }
+
+            if (MI.mayStore()) {
+                bool isFrameOperation = MI.getFlag(MachineInstr::FrameSetup) || MI.getFlag(MachineInstr::FrameDestroy);
+
+                for (unsigned opIdx = 0; opIdx < MI.getNumOperands(); ++opIdx) {
+                    MachineOperand &Op = MI.getOperand(opIdx);
+                    if (Op.isFI()) {
+                        instrumentStackModification(MBB, MBBI, MI, std::variant<MachineOperand*, MachineMemOperand*>(&Op), TII);
+                        Changed = true;
+                    }
+                }
+
+                for (MachineMemOperand *MemOp : MI.memoperands()) {
+                    if (MemOp->isStore()) {
+                        bool isStack = isFrameOperation;
+                        if (!isStack) {
+                            if (const PseudoSourceValue *PSV = MemOp->getPseudoValue()) {
+                                isStack = isa<FixedStackPseudoSourceValue>(PSV) || PSV->isStack();
+                            }
+                        }
+
+                        if (isStack) {
+                            instrumentStackModification(MBB, MBBI, MI, std::variant<MachineOperand*, MachineMemOperand*>(MemOp), TII);
+                            Changed = true;
+                        } else {
+                            instrumentMemoryModification(MBB, MBBI, MI, std::variant<MachineOperand*, MachineMemOperand*>(MemOp), TII);
+                            Changed = true;
+                        }
+                    }
+                }
+            }
         }
-      }
-
-      if (MI.mayStore()) {
-          bool isFrameOperation = MI.getFlag(MachineInstr::FrameSetup) || MI.getFlag(MachineInstr::FrameDestroy);
-          //bool instrumented = false;
-
-          for (unsigned opIdx = 0; opIdx < MI.getNumOperands(); ++opIdx) {
-              MachineOperand &Op = MI.getOperand(opIdx);
-              if (Op.isFI()) {
-                  instrumentStackModification(MBB, MBBI, MI, std::variant<MachineOperand*, MachineMemOperand*>(&Op), TII);
-                  //instrumented = true;
-                  Changed = true;
-                  break;
-              }
-          }
-
-          //if (instrumented) continue;
-
-          for (MachineMemOperand *MemOp : MI.memoperands()) {
-              if (MemOp->isStore()) {
-                  bool isStack = isFrameOperation;
-                  if (!isStack) {
-                      if (const PseudoSourceValue *PSV = MemOp->getPseudoValue()) {
-                          isStack = isa<FixedStackPseudoSourceValue>(PSV) || PSV->isStack();
-                      }
-                  }
-
-                  if (isStack) {
-                      instrumentStackModification(MBB, MBBI, MI, std::variant<MachineOperand*, MachineMemOperand*>(MemOp), TII);
-                      Changed = true;
-                  } else {
-                      instrumentMemoryModification(MBB, MBBI, MI, std::variant<MachineOperand*, MachineMemOperand*>(MemOp), TII);
-                      Changed = true;
-                  }
-              }
-          }
-      }
     }
-  }
-  return Changed;
+    return Changed;
 }
 
 void AArch64Tracer::instrumentStore(
