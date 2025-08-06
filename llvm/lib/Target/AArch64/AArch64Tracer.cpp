@@ -304,6 +304,7 @@ extern "C" void checkpoint_dump_log() {
 #include "llvm/Support/raw_ostream.h"
 #include <variant>
 #include "llvm/Support/Casting.h"
+#include <iostream>
 
 using namespace llvm;
 
