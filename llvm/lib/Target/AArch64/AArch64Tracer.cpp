@@ -296,6 +296,7 @@ extern "C" void checkpoint_dump_log() {
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Module.h"
@@ -549,7 +550,7 @@ FunctionPass *llvm::createAArch64TracerPass() {
 
 INITIALIZE_PASS(AArch64Tracer, "aarch64-tracer", "AArch64 Tracer", false, false)
 
-
+#if 0
 // === File: main.cpp (Example Usage) ===
 
 #include "checkpoint_runtime.h"
@@ -606,8 +607,6 @@ int main() {
 
     return 0;
 }
-
-#if 0
 // === File: Makefile ===
 
 # LLVM_CONFIG should point to the llvm-config executable of your LLVM build
