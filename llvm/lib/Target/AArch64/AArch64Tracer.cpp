@@ -348,7 +348,7 @@ static uint32_t getRegSize(unsigned Reg) {
     if (AArch64::GPR64RegClass.contains(Reg) || AArch64::FPR64RegClass.contains(Reg)) {
         return 8;
     }
-    if (AArch64::GPR32RegClass.contains(Reg)) {
+    if (AArch64::GPR32RegClass.contains(Reg) || AArch64::FPR32RegClass.contains(Reg)) {
         return 4;
     }
     return 0;
