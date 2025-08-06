@@ -324,11 +324,11 @@ public:
 
     StringRef getPassName() const override { return "AArch64 Tracer"; }
 private:
-    void instrumentRegisterModification(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineOperand &Op, const TargetInstrInfo *TII);
+    void instrumentRegisterModification(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, MachineOperand &Op, const TargetInstrInfo *TII);
     void instrumentMemoryModification(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, std::variant<MachineOperand*, MachineMemOperand*> Op, const TargetInstrInfo *TII);
     void instrumentStackModification(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, std::variant<MachineOperand*, MachineMemOperand*> Op, const TargetInstrInfo *TII);
-    void instrumentCall(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, const TargetInstrInfo *TII);
-    void instrumentBranch(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, const TargetInstrInfo *TII);
+    void instrumentCall(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, const TargetInstrInfo *TII);
+    void instrumentBranch(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, const TargetInstrInfo *TII);
     void instrumentStore(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, MachineInstr &MI, const TargetInstrInfo *TII, FunctionCallee &LogFn, uint32_t size);
 
     FunctionCallee LogMemWriteFn;
@@ -376,13 +376,13 @@ bool AArch64Tracer::runOnMachineFunction(MachineFunction &MF) {
             MachineInstr &MI = *MBBI;
 
             if (MI.isCall()) {
-                instrumentCall(MBB, MBBI, TII);
+                instrumentCall(MBB, MBBI, MI, TII);
                 Changed = true;
                 continue;
             }
 
             if (MI.isBranch()) {
-                instrumentBranch(MBB, MBBI, TII);
+                instrumentBranch(MBB, MBBI, MI, TII);
                 Changed = true;
                 continue;
             }
@@ -390,7 +390,7 @@ bool AArch64Tracer::runOnMachineFunction(MachineFunction &MF) {
             for (unsigned opIdx = 0; opIdx < MI.getNumOperands(); ++opIdx) {
                 MachineOperand &Op = MI.getOperand(opIdx);
                 if (Op.isDef() && Op.isReg() && !Op.isImplicit()) {
-                    instrumentRegisterModification(MBB, std::next(MBBI), Op, TII);
+                    instrumentRegisterModification(MBB, std::next(MBBI), MI, Op, TII);
                     Changed = true;
                 }
             }
@@ -474,7 +474,7 @@ void AArch64Tracer::instrumentMemoryModification(
 
     instrumentStore(MBB, MBBI, MI, TII, LogMemWriteFn, size);*/
 
-    dbgs() << "Memory instrumented" << "\n";
+    dbgs() << "Memory instrumented: " << MI;
 }
 
 void AArch64Tracer::instrumentStackModification(
@@ -496,12 +496,13 @@ void AArch64Tracer::instrumentStackModification(
 
     instrumentStore(MBB, MBBI, MI, TII, LogStackWriteFn, size);*/
 
-    dbgs() << "Stack instrumented" << "\n";
+    dbgs() << "Stack instrumented: " << MI;
 }
 
 void AArch64Tracer::instrumentRegisterModification(
   MachineBasicBlock &MBB, 
   MachineBasicBlock::iterator MBBI, 
+  MachineInstr &MI, 
   MachineOperand &Op, 
   const TargetInstrInfo *TII
 ) {
@@ -518,7 +519,7 @@ void AArch64Tracer::instrumentRegisterModification(
     BuildMI(MBB, MBBI, DL, TII->get(MovOpc), AArch64::X1).addReg(AArch64::GPR64RegClass.contains(Reg) ? AArch64::XZR : AArch64::WZR).addReg(Reg).addImm(0);
     BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogRegWriteFn.getCallee());*/
 
-    dbgs() << "Register instrumented" << "\n";
+    dbgs() << "Register instrumented: " << MI;
 }
 
 void AArch64Tracer::instrumentCall(
@@ -534,7 +535,7 @@ void AArch64Tracer::instrumentCall(
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogCallFn.getCallee());
     }*/
 
-    dbgs() << "Call instrumented" << "\n";
+    dbgs() << "Call instrumented: " << MI;
 }
 
 void AArch64Tracer::instrumentBranch(
@@ -550,7 +551,7 @@ void AArch64Tracer::instrumentBranch(
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogBranchFn.getCallee());
     }*/
 
-    dbgs() << "Branch instrumented" << "\n";
+    dbgs() << "Branch instrumented: " << MI;
 }
 
 
