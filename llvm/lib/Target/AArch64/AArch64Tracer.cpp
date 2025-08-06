@@ -463,7 +463,7 @@ void AArch64Tracer::instrumentMemoryModification(
   std::variant<MachineOperand*, MachineMemOperand*> Op, 
   const TargetInstrInfo *TII
 ) {
-    uint32_t size = 0;
+    /*uint32_t size = 0;
     if (std::holds_alternative<MachineMemOperand*>(Op)) {
         size = std::get<MachineMemOperand*>(Op)->getSize();
     }
@@ -472,7 +472,7 @@ void AArch64Tracer::instrumentMemoryModification(
     }
     if (size == 0) return;
 
-    instrumentStore(MBB, MBBI, MI, TII, LogMemWriteFn, size);
+    instrumentStore(MBB, MBBI, MI, TII, LogMemWriteFn, size);*/
 }
 
 void AArch64Tracer::instrumentStackModification(
@@ -482,7 +482,7 @@ void AArch64Tracer::instrumentStackModification(
   std::variant<MachineOperand*, MachineMemOperand*> Op, 
   const TargetInstrInfo *TII
 ) {
-    uint32_t size = 0;
+    /*uint32_t size = 0;
     if (std::holds_alternative<MachineMemOperand*>(Op)) {
         size = std::get<MachineMemOperand*>(Op)->getSize();
     } else if (std::holds_alternative<MachineOperand*>(Op)) {
@@ -492,7 +492,7 @@ void AArch64Tracer::instrumentStackModification(
     }
     if (size == 0) return;
 
-    instrumentStore(MBB, MBBI, MI, TII, LogStackWriteFn, size);
+    instrumentStore(MBB, MBBI, MI, TII, LogStackWriteFn, size);*/
 }
 
 void AArch64Tracer::instrumentRegisterModification(
@@ -501,7 +501,7 @@ void AArch64Tracer::instrumentRegisterModification(
   MachineOperand &Op, 
   const TargetInstrInfo *TII
 ) {
-    DebugLoc DL = Op.getParent()->getDebugLoc();
+    /*DebugLoc DL = Op.getParent()->getDebugLoc();
     Register Reg = Op.getReg();
 
     if (!AArch64::GPR64RegClass.contains(Reg) && !AArch64::GPR32RegClass.contains(Reg)) {
@@ -512,7 +512,7 @@ void AArch64Tracer::instrumentRegisterModification(
     BuildMI(MBB, MBBI, DL, TII->get(AArch64::MOVi64), AArch64::X0).addImm(regId);
     unsigned MovOpc = AArch64::GPR64RegClass.contains(Reg) ? AArch64::ORRXrs : AArch64::ORRWrs;
     BuildMI(MBB, MBBI, DL, TII->get(MovOpc), AArch64::X1).addReg(AArch64::GPR64RegClass.contains(Reg) ? AArch64::XZR : AArch64::WZR).addReg(Reg).addImm(0);
-    BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogRegWriteFn.getCallee());
+    BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogRegWriteFn.getCallee());*/
 }
 
 void AArch64Tracer::instrumentCall(
@@ -520,13 +520,13 @@ void AArch64Tracer::instrumentCall(
   MachineBasicBlock::iterator MBBI, 
   const TargetInstrInfo *TII
 ) {
-    MachineInstr &MI = *MBBI;
+    /*MachineInstr &MI = *MBBI;
     DebugLoc DL = MI.getDebugLoc();
 
     if (MI.getOperand(0).isGlobal() || MI.getOperand(0).isSymbol()) {
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::MOVaddr), AArch64::X0).add(MI.getOperand(0));
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogCallFn.getCallee());
-    }
+    }*/
 }
 
 void AArch64Tracer::instrumentBranch(
@@ -534,13 +534,13 @@ void AArch64Tracer::instrumentBranch(
   MachineBasicBlock::iterator MBBI, 
   const TargetInstrInfo *TII
 ) {
-    MachineInstr &MI = *MBBI;
+    /*MachineInstr &MI = *MBBI;
     DebugLoc DL = MI.getDebugLoc();
 
     if (MI.getOperand(0).isMBB()) {
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::MOVi64), AArch64::X0).addImm(0);
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogBranchFn.getCallee());
-    }
+    }*/
 }
 
 
