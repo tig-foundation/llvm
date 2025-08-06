@@ -525,6 +525,7 @@ void AArch64Tracer::instrumentRegisterModification(
 void AArch64Tracer::instrumentCall(
   MachineBasicBlock &MBB, 
   MachineBasicBlock::iterator MBBI, 
+  MachineInstr &MI, 
   const TargetInstrInfo *TII
 ) {
     /*MachineInstr &MI = *MBBI;
@@ -541,6 +542,7 @@ void AArch64Tracer::instrumentCall(
 void AArch64Tracer::instrumentBranch(
   MachineBasicBlock &MBB, 
   MachineBasicBlock::iterator MBBI, 
+  MachineInstr &MI, 
   const TargetInstrInfo *TII
 ) {
     /*MachineInstr &MI = *MBBI;
