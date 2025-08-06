@@ -357,7 +357,7 @@ static uint32_t getRegSize(unsigned Reg) {
 bool AArch64Tracer::runOnMachineFunction(MachineFunction &MF) {
   bool Changed = false;
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
-  Module *M = MF.getMMI().getModule();
+  auto M = MF.getMMI().getModule();
 
   LLVMContext &Ctx = M->getContext();
   Type *VoidTy = Type::getVoidTy(Ctx);
