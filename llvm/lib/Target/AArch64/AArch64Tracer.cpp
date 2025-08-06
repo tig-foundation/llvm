@@ -456,6 +456,8 @@ void AArch64Tracer::instrumentStore(
     BuildMI(MBB, MBBI, DL, TII->get(MovOpc), AArch64::X1).addReg(AArch64::GPR64RegClass.contains(ValReg) ? AArch64::XZR : AArch64::WZR).addReg(ValReg).addImm(0);
     BuildMI(MBB, MBBI, DL, TII->get(AArch64::MOVi64), AArch64::X2).addImm(size);
     BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogFn.getCallee());*/
+
+    dbgs() << "Store instrumented" << "\n";
 }
 
 void AArch64Tracer::instrumentMemoryModification(
@@ -476,7 +478,7 @@ void AArch64Tracer::instrumentMemoryModification(
 
     instrumentStore(MBB, MBBI, MI, TII, LogMemWriteFn, size);*/
 
-    dbgs() << "Memory instrumented" << std::endl;
+    dbgs() << "Memory instrumented" << "\n";
 }
 
 void AArch64Tracer::instrumentStackModification(
@@ -498,7 +500,7 @@ void AArch64Tracer::instrumentStackModification(
 
     instrumentStore(MBB, MBBI, MI, TII, LogStackWriteFn, size);*/
 
-    dbgs() << "Stack instrumented" << std::endl;
+    dbgs() << "Stack instrumented" << "\n";
 }
 
 void AArch64Tracer::instrumentRegisterModification(
@@ -520,7 +522,7 @@ void AArch64Tracer::instrumentRegisterModification(
     BuildMI(MBB, MBBI, DL, TII->get(MovOpc), AArch64::X1).addReg(AArch64::GPR64RegClass.contains(Reg) ? AArch64::XZR : AArch64::WZR).addReg(Reg).addImm(0);
     BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogRegWriteFn.getCallee());*/
 
-    dbgs() << "Register instrumented" << std::endl;
+    dbgs() << "Register instrumented" << "\n";
 }
 
 void AArch64Tracer::instrumentCall(
@@ -536,7 +538,7 @@ void AArch64Tracer::instrumentCall(
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogCallFn.getCallee());
     }*/
 
-    dbgs() << "Call instrumented" << std::endl;
+    dbgs() << "Call instrumented" << "\n";
 }
 
 void AArch64Tracer::instrumentBranch(
@@ -552,7 +554,7 @@ void AArch64Tracer::instrumentBranch(
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogBranchFn.getCallee());
     }*/
 
-    dbgs() << "Branch instrumented" << std::endl;
+    dbgs() << "Branch instrumented" << "\n";
 }
 
 
