@@ -10,8 +10,8 @@
 #include <stdint.h>
 
 #define ARENA_SIZE (1024UL * 1024 * 1024 * 10)
-#define ALLOC_MAGIC 0xDEADBEEF
-#define ARENA_FIXED_ADDRESS ((void*)0x200000000000)
+#define ALLOC_MAGIC 0xC001C0DE
+#define ARENA_FIXED_ADDRESS ((void*)0x0002'0000'0000'0000)
 
 typedef struct AllocHeader {
     size_t size;
