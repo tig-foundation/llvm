@@ -26,7 +26,7 @@ static AllocHeader* s_free_list_head = NULL;
 static pthread_once_t s_init_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t s_alloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static void write_stderr(const char* msg) {
+static void write_stderr(const char *msg) {
     write(STDERR_FILENO, msg, strlen(msg));
 }
 
@@ -58,9 +58,9 @@ void init_allocator() {
     printf("--- Custom Malloc Initialized ---\nArena start address successfully mapped at: %p\n", s_arena_start);
 }
 
-static AllocHeader* find_free_block(size_t size) {
-    AllocHeader* current = s_free_list_head;
-    AllocHeader* prev = NULL;
+static AllocHeader *find_free_block(size_t size) {
+    AllocHeader *current = s_free_list_head;
+    AllocHeader *prev = NULL;
     while (current) {
         if (current->size >= size) {
             if (prev) { prev->next = current->next; }
@@ -75,13 +75,13 @@ static AllocHeader* find_free_block(size_t size) {
     return NULL;
 }
 
-void* malloc(size_t size) {
+void *malloc(size_t size) {
     pthread_once(&s_init_once, init_allocator);
     if (size == 0) return NULL;
     
     size = (size + 7) & ~7; // align to 8 bytes
-    AllocHeader* header = NULL;
-    void* user_ptr = NULL;
+    AllocHeader *header = NULL;
+    void *user_ptr = NULL;
     pthread_mutex_lock(&s_alloc_mutex);
     header = find_free_block(size);
     if (!header) {
@@ -92,24 +92,24 @@ void* malloc(size_t size) {
             return NULL;
         }
 
-        header = (AllocHeader*)((char*)s_arena_start + s_arena_used);
+        header = (AllocHeader *)((char *)(s_arena_start) + s_arena_used);
         s_arena_used += total_size;
     }
 
     header->size = size;
     header->magic = ALLOC_MAGIC;
     header->next = NULL;
-    user_ptr = (void*)(header + 1);
+    user_ptr = (void *)(header + 1);
     pthread_mutex_unlock(&s_alloc_mutex);
 
     return user_ptr;
 }
 
-void free(void* ptr) {
+void free(void *ptr) {
     if (ptr == NULL) return;
 
     pthread_mutex_lock(&s_alloc_mutex);
-    AllocHeader* header = (AllocHeader*)ptr - 1;
+    AllocHeader *header = ((AllocHeader *)(ptr)) - 1;
     if (header->magic != ALLOC_MAGIC) {
         write_stderr("FATAL: Invalid pointer or double free detected in custom_free().\n");
         pthread_mutex_unlock(&s_alloc_mutex);
@@ -119,18 +119,19 @@ void free(void* ptr) {
     header->next = s_free_list_head;
     s_free_list_head = header;
     header->magic = 0;
+    s_arena_used -= header->size;
     pthread_mutex_unlock(&s_alloc_mutex);
 }
 
-void* realloc(void* ptr, size_t new_size) {
+void *realloc(void *ptr, size_t new_size) {
     if (!ptr) return malloc(new_size);
     if (new_size == 0) { free(ptr); return NULL; }
 
-    AllocHeader* header = (AllocHeader*)ptr - 1;
+    AllocHeader *header = ((AllocHeader *)(ptr)) - 1;
     size_t old_size = header->size;
     if (new_size <= old_size) return ptr;
     
-    void* new_ptr = malloc(new_size);
+    void *new_ptr = malloc(new_size);
     if (!new_ptr) return NULL;
 
     memcpy(new_ptr, ptr, old_size);
@@ -138,10 +139,12 @@ void* realloc(void* ptr, size_t new_size) {
     return new_ptr;
 }
 
-void* calloc(size_t nmemb, size_t size) {
+void *calloc(size_t nmemb, size_t size) {
     size_t total_size = nmemb * size;
     if (size != 0 && total_size / size != nmemb) return NULL;
+
     void* ptr = malloc(total_size);
     if (ptr) { memset(ptr, 0, total_size); }
+    
     return ptr;
 }

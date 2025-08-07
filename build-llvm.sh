@@ -31,10 +31,10 @@ if [ $? -ne 0 ]; then
 fi
 
 # build libmalloc.so
-clang -shared -fPIC -o build/lib/libmalloc.so snapshot/malloc.c -O2
+PATH="$(pwd)/build/bin:$PATH" clang -o build/lib/libmalloc.o snapshot/malloc.c -O3 -c -
 if [ $? -ne 0 ]; then
-    echo "Failed to build libmalloc.so"
+    echo "Failed to build libmalloc.o"
     exit 1
 fi
 
-echo "Successfully built libmalloc.so"
+echo "Successfully built libmalloc.o"
