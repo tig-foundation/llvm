@@ -68,7 +68,7 @@ static AllocHeader *find_free_block(size_t size) {
     return NULL;
 }
 
-void* internal_malloc(size_t size) {
+void *internal_malloc(size_t size) {
     if (size == 0) return NULL;
     
     AllocHeader *header = NULL;
@@ -91,7 +91,7 @@ void* internal_malloc(size_t size) {
     return (void*)(header + 1);
 }
 
-void internal_free(void* ptr) {
+void internal_free(void *ptr) {
     if (ptr == NULL) return;
 
     pthread_mutex_lock(&s_alloc_mutex);
@@ -112,39 +112,39 @@ void* aligned_malloc(size_t size, size_t align) {
     pthread_once(&s_init_once, init_allocator);
     if (size == 0) return NULL;
 
-    if (align < sizeof(void*)) {
-        align = sizeof(void*);
+    if (align < sizeof(void *)) {
+        align = sizeof(void *);
     }
     
-    size_t total_alloc_size = size + align + sizeof(AllocHeader) + sizeof(void*);
-    void* raw_ptr = internal_malloc(total_alloc_size);
+    size_t total_alloc_size = size + align + sizeof(AllocHeader) + sizeof(void *);
+    void *raw_ptr = internal_malloc(total_alloc_size);
     if (!raw_ptr) return NULL;
 
-    uintptr_t aligned_addr = ((uintptr_t)raw_ptr + sizeof(void*) + align - 1) & ~(align - 1);
-    void* aligned_ptr = (void*)aligned_addr;
+    uintptr_t aligned_addr = ((uintptr_t)(raw_ptr) + sizeof(void *) + align - 1) & ~(align - 1);
+    void *aligned_ptr = (void *)(aligned_addr);
     
-    ((void**)aligned_ptr)[-1] = raw_ptr;
+    ((void **)(aligned_ptr))[-1] = raw_ptr;
 
     return aligned_ptr;
 }
 
-void aligned_free(void* ptr) {
+void aligned_free(void *ptr) {
     if (!ptr) return;
-    void* raw_ptr = ((void**)ptr)[-1];
+    void* raw_ptr = ((void **)(ptr))[-1];
     internal_free(raw_ptr);
 }
 
-void* __rust_alloc(size_t size, size_t align) {
+void *__rust_alloc(size_t size, size_t align) {
     return aligned_malloc(size, align);
 }
 
-void __rust_dealloc(void* ptr, size_t size, size_t align) {
+void __rust_dealloc(void *ptr, size_t size, size_t align) {
     (void)size;
     (void)align;
     aligned_free(ptr);
 }
 
-void* __rust_realloc(void* ptr, size_t old_size, size_t align, size_t new_size) {
+void *__rust_realloc(void *ptr, size_t old_size, size_t align, size_t new_size) {
     (void)old_size;
     if (!ptr) {
         return aligned_malloc(new_size, align);
@@ -154,7 +154,7 @@ void* __rust_realloc(void* ptr, size_t old_size, size_t align, size_t new_size) 
         return NULL;
     }
     
-    void* new_ptr = aligned_malloc(new_size, align);
+    void *new_ptr = aligned_malloc(new_size, align);
     if (!new_ptr) return NULL;
     
     memcpy(new_ptr, ptr, old_size < new_size ? old_size : new_size);
@@ -163,8 +163,8 @@ void* __rust_realloc(void* ptr, size_t old_size, size_t align, size_t new_size) 
     return new_ptr;
 }
 
-void* __rust_alloc_zeroed(size_t size, size_t align) {
-    void* ptr = aligned_malloc(size, align);
+void *__rust_alloc_zeroed(size_t size, size_t align) {
+    void *ptr = aligned_malloc(size, align);
     if (ptr) {
         memset(ptr, 0, size);
     }
