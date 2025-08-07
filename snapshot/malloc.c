@@ -104,7 +104,7 @@ void* aligned_malloc(size_t size, size_t align) {
     
     ((void **)(aligned_ptr))[-1] = raw_ptr;
 
-    printf("aligned_ptr: %p\n", aligned_ptr);
+    printf("aligned_ptr: %p, raw_ptr: %p\n", aligned_ptr, raw_ptr);
 
     return aligned_ptr;
 }
