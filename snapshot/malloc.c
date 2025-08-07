@@ -9,7 +9,7 @@
 #include <errno.h>
 #include <stdint.h>
 
-#define ARENA_SIZE (1024UL * 1024 * 1024 * 1) // 1gb
+#define ARENA_SIZE (1024UL * 1024 * 1024 * 16) // 16gb
 #define ALLOC_MAGIC 0xC001C0DE
 #define ARENA_FIXED_ADDRESS ((void*)0x40000000000)
 
@@ -50,7 +50,7 @@ void init_allocator() {
         write_stderr("FATAL: mmap did not return the requested fixed address.\n");
         exit(1);
     }
-    printf("--- Custom Malloc Initialized ---\nArena start address successfully mapped at: %p\n", s_arena_start);
+    printf("--- Custom Malloc Initialized ---\nArena start address successfully mapped at: %p, size: %p\n", s_arena_start, ARENA_SIZE);
 }
 
 static AllocHeader *find_free_block(size_t size) {
