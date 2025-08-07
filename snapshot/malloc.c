@@ -104,6 +104,8 @@ void* aligned_malloc(size_t size, size_t align) {
     
     ((void **)(aligned_ptr))[-1] = raw_ptr;
 
+    printf("aligned_ptr: %p\n", aligned_ptr);
+
     return aligned_ptr;
 }
 
@@ -201,8 +203,5 @@ void init_allocator() {
         write_stderr("FATAL: mmap did not return the requested fixed address.\n");
         exit(1);
     }
-    void *test_ptr = malloc(1024);
     printf("--- Custom Malloc Initialized ---\nArena start address successfully mapped at: %p, size: %p\n", s_arena_start, ARENA_SIZE);
-    printf("test_ptr: %p\n", test_ptr);
-    free(test_ptr);
 }
