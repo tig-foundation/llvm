@@ -283,7 +283,7 @@ extern "C" void checkpoint_dump_log() {
 }
 #endif
 
-// === File: AArch64Tracer.cpp (Modified) ===
+// === File: AArch64Tracer.cpp ===
 
 #include "AArch64.h"
 #include "AArch64InstrInfo.h"
@@ -453,7 +453,7 @@ void AArch64Tracer::instrumentStore(
     BuildMI(MBB, MBBI, DL, TII->get(AArch64::MOVi64), AArch64::X2).addImm(size);
     BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogFn.getCallee());*/
 
-    dbgs() << "Store instrumented" << "\n";
+    LLVM_DEBUG(dbgs() << "Store instrumented" << "\n");
 }
 
 void AArch64Tracer::instrumentMemoryModification(
@@ -474,7 +474,7 @@ void AArch64Tracer::instrumentMemoryModification(
 
     instrumentStore(MBB, MBBI, MI, TII, LogMemWriteFn, size);*/
 
-    dbgs() << "Memory instrumented: " << MI;
+    LLVM_DEBUG(dbgs() << "Memory instrumented: " << MI);
 }
 
 void AArch64Tracer::instrumentStackModification(
@@ -496,7 +496,7 @@ void AArch64Tracer::instrumentStackModification(
 
     instrumentStore(MBB, MBBI, MI, TII, LogStackWriteFn, size);*/
 
-    dbgs() << "Stack instrumented: " << MI;
+    LLVM_DEBUG(dbgs() << "Stack instrumented: " << MI);
 }
 
 void AArch64Tracer::instrumentRegisterModification(
@@ -519,7 +519,7 @@ void AArch64Tracer::instrumentRegisterModification(
     BuildMI(MBB, MBBI, DL, TII->get(MovOpc), AArch64::X1).addReg(AArch64::GPR64RegClass.contains(Reg) ? AArch64::XZR : AArch64::WZR).addReg(Reg).addImm(0);
     BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogRegWriteFn.getCallee());*/
 
-    dbgs() << "Register instrumented: " << MI;
+    LLVM_DEBUG(dbgs() << "Register instrumented: " << MI);
 }
 
 void AArch64Tracer::instrumentCall(
@@ -536,7 +536,7 @@ void AArch64Tracer::instrumentCall(
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogCallFn.getCallee());
     }*/
 
-    dbgs() << "Call instrumented: " << MI;
+    LLVM_DEBUG(dbgs() << "Call instrumented: " << MI);
 }
 
 void AArch64Tracer::instrumentBranch(
@@ -553,7 +553,7 @@ void AArch64Tracer::instrumentBranch(
         BuildMI(MBB, MBBI, DL, TII->get(AArch64::BL)).addGlobalAddress(LogBranchFn.getCallee());
     }*/
 
-    dbgs() << "Branch instrumented: " << MI;
+    LLVM_DEBUG(dbgs() << "Branch instrumented: " << MI);
 }
 
 
@@ -620,65 +620,3 @@ int main() {
 
     return 0;
 }
-// === File: Makefile ===
-
-# LLVM_CONFIG should point to the llvm-config executable of your LLVM build
-LLVM_CONFIG = llvm-config-15
-
-# Compiler and flags
-CXX = clang++-15
-CXXFLAGS = -O2 -fno-rtti
-LDFLAGS =
-
-# Get LLVM flags
-LLVM_CXXFLAGS = $(shell $(LLVM_CONFIG) --cxxflags)
-LLVM_LDFLAGS = $(shell $(LLVM_CONFIG) --ldflags --libs core mcjit native)
-LLVM_SO_LDFLAGS = $(shell $(LLVM_CONFIG) --ldflags)
-
-# Project files
-PASS_SRC = AArch64Tracer.cpp
-PASS_OBJ = $(PASS_SRC:.cpp=.o)
-PASS_SO = AArch64Tracer.so
-
-RUNTIME_SRC = checkpoint_runtime.cpp
-RUNTIME_OBJ = $(RUNTIME_SRC:.cpp=.o)
-
-MAIN_SRC = main.cpp
-MAIN_OBJ = $(MAIN_SRC:.cpp=.o)
-MAIN_INSTRUMENTED_OBJ = main.instrumented.o
-MAIN_EXEC = main_instrumented
-
-.PHONY: all clean
-
-all: $(MAIN_EXEC)
-
-# Build the LLVM pass as a shared object
-$(PASS_SO): $(PASS_OBJ)
-	$(CXX) -shared $(PASS_OBJ) -o $@ $(LLVM_SO_LDFLAGS)
-
-$(PASS_OBJ): $(PASS_SRC)
-	$(CXX) $(CXXFLAGS) $(LLVM_CXXFLAGS) -fPIC -c $< -o $@
-
-# Build the runtime library
-$(RUNTIME_OBJ): $(RUNTIME_SRC) checkpoint_runtime.h
-	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-# Build the main application object
-$(MAIN_OBJ): $(MAIN_SRC) checkpoint_runtime.h
-	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-# Create an instrumented version of the main object file using the modern pass manager syntax
-$(MAIN_INSTRUMENTED_OBJ): $(MAIN_OBJ) $(PASS_SO)
-	opt-15 -load-pass-plugin./$(PASS_SO) -passes=aarch64-tracer -S $(MAIN_OBJ:.o=.ll) | llc-15 -filetype=obj -o $@
-
-# Link the final executable
-$(MAIN_EXEC): $(MAIN_INSTRUMENTED_OBJ) $(RUNTIME_OBJ)
-	$(CXX) $(MAIN_INSTRUMENTED_OBJ) $(RUNTIME_OBJ) -o $@ $(LDFLAGS)
-
-# Rule to generate.ll from.cpp for inspection (optional)
-%.ll: %.cpp
-	$(CXX) $(CXXFLAGS) -S -emit-llvm -o $@ $<
-
-clean:
-	rm -f *.o *.so *.ll $(MAIN_EXEC) main.instrumented.o
-#endif
