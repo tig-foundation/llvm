@@ -11,7 +11,7 @@
 
 #define ARENA_SIZE (1024UL * 1024 * 1024 * 10)
 #define ALLOC_MAGIC 0xC001C0DE
-#define ARENA_FIXED_ADDRESS ((void*)0x0002'0000'0000'0000)
+#define ARENA_FIXED_ADDRESS ((void*)0x0002000000000000)
 
 typedef struct AllocHeader {
     size_t size;
