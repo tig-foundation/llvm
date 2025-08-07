@@ -14,7 +14,7 @@ ulimit -n 65535
 
 if [ -z "$BUILD_JOBS" ]
 then
-    BUILD_JOBS=6
+    BUILD_JOBS=$(nproc)
 fi
 
 CC=$(which clang) CXX=$(which clang++) cmake -S llvm -B build-llvm \
@@ -24,3 +24,17 @@ CC=$(which clang) CXX=$(which clang++) cmake -S llvm -B build-llvm \
     -DLLVM_TARGETS_TO_BUILD="AArch64;X86" &&
 CC=$(which clang) CXX=$(which clang++) cmake --build build-llvm -j$BUILD_JOBS &&
 cmake -DCMAKE_INSTALL_PREFIX=./build/ -P build-llvm/cmake_install.cmake
+
+if [ $? -ne 0 ]; then
+    echo "Failed to build LLVM"
+    exit 1
+fi
+
+# build libmalloc.so
+clang -shared -fPIC -o build/lib/libmalloc.so snapshot/malloc.c -O2
+if [ $? -ne 0 ]; then
+    echo "Failed to build libmalloc.so"
+    exit 1
+fi
+
+echo "Successfully built libmalloc.so"
