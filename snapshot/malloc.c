@@ -9,9 +9,9 @@
 #include <errno.h>
 #include <stdint.h>
 
-#define ARENA_SIZE (1024UL * 1024 * 1024 * 10)
+#define ARENA_SIZE (1024UL * 1024 * 1024 * 1) // 1gb
 #define ALLOC_MAGIC 0xC001C0DE
-#define ARENA_FIXED_ADDRESS ((void*)0x0002000000000000)
+#define ARENA_FIXED_ADDRESS ((void*)0x40000000000)
 
 typedef struct AllocHeader {
     size_t size;
@@ -44,7 +44,7 @@ void init_allocator() {
         if (errno == EEXIST) {
             write_stderr("Reason: The address range is already in use.\n");
         }
-        exit(1);
+        exit(errno);
     }
     if (s_arena_start != ARENA_FIXED_ADDRESS) {
         write_stderr("FATAL: mmap did not return the requested fixed address.\n");
