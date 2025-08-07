@@ -9,7 +9,7 @@
 #include <errno.h>
 #include <stdint.h>
 
-#define ARENA_SIZE (1024UL * 1024 * 1024 * 16) // 16gb
+#define ARENA_SIZE (1024UL * 1024 * 1024 * 32) // 32gb
 #define ALLOC_MAGIC 0xC001C0DE
 #define ARENA_FIXED_ADDRESS ((void*)0x40000000000)
 
