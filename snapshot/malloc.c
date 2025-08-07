@@ -170,3 +170,34 @@ void* __rust_alloc_zeroed(size_t size, size_t align) {
     }
     return ptr;
 }
+
+void *calloc(size_t nmemb, size_t size) {
+    void *ptr =  aligned_malloc(nmemb * size, sizeof(void*));
+    if (ptr) {
+        memset(ptr, 0, nmemb * size);
+    }
+    return ptr;
+}
+
+void *realloc(void *ptr, size_t size) {
+    if (!ptr) {
+        return aligned_malloc(size, sizeof(void*));
+    }
+    if (size == 0) {
+        aligned_free(ptr);
+        return NULL;
+    }
+    void *new_ptr = aligned_malloc(size, sizeof(void*));
+    if (!new_ptr) return NULL;
+    memcpy(new_ptr, ptr, size);
+    aligned_free(ptr);
+    return new_ptr;
+}
+
+void free(void *ptr) {
+    aligned_free(ptr);
+}
+
+void *malloc(size_t size) {
+    return aligned_malloc(size, sizeof(void*));
+}
