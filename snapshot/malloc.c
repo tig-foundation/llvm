@@ -30,28 +30,7 @@ static void write_stderr(const char *msg) {
     write(STDERR_FILENO, msg, strlen(msg));
 }
 
-void init_allocator() {
-    s_arena_start = mmap(
-        ARENA_FIXED_ADDRESS,
-        ARENA_SIZE,
-        PROT_READ | PROT_WRITE,
-        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
-        -1,
-        0
-    );
-    if (s_arena_start == MAP_FAILED) {
-        perror("FATAL: Failed to mmap custom memory arena at fixed address");
-        if (errno == EEXIST) {
-            write_stderr("Reason: The address range is already in use.\n");
-        }
-        exit(errno);
-    }
-    if (s_arena_start != ARENA_FIXED_ADDRESS) {
-        write_stderr("FATAL: mmap did not return the requested fixed address.\n");
-        exit(1);
-    }
-    printf("--- Custom Malloc Initialized ---\nArena start address successfully mapped at: %p, size: %p\n", s_arena_start, ARENA_SIZE);
-}
+void init_allocator();
 
 static AllocHeader *find_free_block(size_t size) {
     AllocHeader *current = s_free_list_head;
@@ -200,4 +179,30 @@ void free(void *ptr) {
 
 void *malloc(size_t size) {
     return aligned_malloc(size, sizeof(void*));
+}
+
+void init_allocator() {
+    s_arena_start = mmap(
+        ARENA_FIXED_ADDRESS,
+        ARENA_SIZE,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+        -1,
+        0
+    );
+    if (s_arena_start == MAP_FAILED) {
+        perror("FATAL: Failed to mmap custom memory arena at fixed address");
+        if (errno == EEXIST) {
+            write_stderr("Reason: The address range is already in use.\n");
+        }
+        exit(errno);
+    }
+    if (s_arena_start != ARENA_FIXED_ADDRESS) {
+        write_stderr("FATAL: mmap did not return the requested fixed address.\n");
+        exit(1);
+    }
+    void *test_ptr = malloc(1024);
+    printf("--- Custom Malloc Initialized ---\nArena start address successfully mapped at: %p, size: %p\n", s_arena_start, ARENA_SIZE);
+    printf("test_ptr: %p\n", test_ptr);
+    free(test_ptr);
 }
