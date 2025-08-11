@@ -220,7 +220,7 @@ void* metadata_alloc(size_t size) {
 
     pthread_mutex_lock(&s_metadata_mutex);
     
-    if ((char*)s_metadata_current - size < s_metadata_arena_start) {
+    if ((char*)s_metadata_current - size < (char*)s_metadata_arena_start) {
         // Out of metadata memory
         pthread_mutex_unlock(&s_metadata_mutex);
         return NULL;
