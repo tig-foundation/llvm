@@ -30,7 +30,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# build libmalloc.so
+# build libmalloc
 PATH="$(pwd)/build/bin:$PATH" clang -o build/lib/libmalloc.o snapshot/malloc.c -O3 -c
 if [ $? -ne 0 ]; then
     echo "Failed to build libmalloc.o"
@@ -38,3 +38,12 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Successfully built libmalloc.o"
+
+# build libstack
+PATH="$(pwd)/build/bin:$PATH" clang -o build/lib/libstack.o snapshot/stack.c -O3 -c
+if [ $? -ne 0 ]; then
+    echo "Failed to build libstack.o"
+    exit 1
+fi
+
+echo "Successfully built libstack.o"
