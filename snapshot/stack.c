@@ -2,7 +2,8 @@
 // arg0: stack_top_ptr - The TOP address of the new stack. It will be aligned internally.
 // arg1: func_to_call - The function to call on the new stack.
 // arg2: arg - The argument to pass to func_to_call.
-__attribute__((naked)) __attribute__((visibility("default"))) void __switch_stack_and_call(void* stack_top_ptr, void (*func_to_call)(void*), void* arg) {
+__attribute__((naked)) __attribute__((visibility("default"))) __attribute__((externally_visible)
+void __switch_stack_and_call(void* stack_top_ptr, void (*func_to_call)(void*), void* arg) {
     #ifdef __x86_64__
         __asm__ volatile (
             // Backup the caller's state
