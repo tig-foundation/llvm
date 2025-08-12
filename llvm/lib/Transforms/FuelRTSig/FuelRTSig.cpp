@@ -597,14 +597,14 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
     if (isFirstSrc)
     {
         // Create fuel globals
-        FuelGlobal = new GlobalVariable(M,
+        /*FuelGlobal = new GlobalVariable(M,
             Type::getInt64Ty(Context),
             false,
             GlobalValue::ExternalLinkage,
             ConstantInt::get(Type::getInt64Ty(Context), 0x7FFFFFFFFFFFFFFF),
             "__fuel_remaining");
         FuelGlobal->setAlignment(Align(8));
-        //FuelGlobal->setDSOLocal(true);
+        //FuelGlobal->setDSOLocal(true);*/
 
         // Add thread-local variable for fuel tracking
         ThreadLocalFuelGlobal = new GlobalVariable(M,
@@ -618,12 +618,18 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         ThreadLocalFuelGlobal->setThreadLocal(true); 
 
         // Create runtime signature globals
-        RuntimeSigGlobal = new GlobalVariable(M, 
+        /*RuntimeSigGlobal = new GlobalVariable(M, 
             Type::getInt64Ty(Context),
             false,
             GlobalValue::ExternalLinkage,
             ConstantInt::get(Type::getInt64Ty(Context), 0x4C4C4D564F4C4C4C),
-            "__runtime_signature");
+            "__runtime_signature");*/
+
+        FuelGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__fuel_remaining", Type::getInt64Ty(Context)));
+        FuelGlobal->setLinkage(GlobalValue::ExternalLinkage);
+        
+        RuntimeSigGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__runtime_signature", Type::getInt64Ty(Context)));
+        RuntimeSigGlobal->setLinkage(GlobalValue::ExternalLinkage);
         
         // Add thread-local variable for runtime signature tracking
         ThreadLocalRuntimeSigGlobal = new GlobalVariable(M,
@@ -663,14 +669,17 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         MaxMemoryUsageGlobal->setAlignment(Align(8));
         //MaxMemoryUsageGlobal->setDSOLocal(true);
 
-        MaxAllowedMemoryUsageGlobal = new GlobalVariable(M,
+        /*MaxAllowedMemoryUsageGlobal = new GlobalVariable(M,
             Type::getInt64Ty(Context),
             false,
             GlobalValue::ExternalLinkage,
             ConstantInt::get(Type::getInt64Ty(Context), 0xFFFFFFFFFFFFFFFF),
             "__max_allowed_memory_usage");
         MaxAllowedMemoryUsageGlobal->setAlignment(Align(8));
-        MaxAllowedMemoryUsageGlobal->setDSOLocal(false);
+        MaxAllowedMemoryUsageGlobal->setDSOLocal(false);*/
+
+        MaxAllowedMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__max_allowed_memory_usage", Type::getInt64Ty(Context)));
+        MaxAllowedMemoryUsageGlobal->setLinkage(GlobalValue::ExternalLinkage);
 
         // Create check fuel function
         FunctionType *CheckFuelType = FunctionType::get(
