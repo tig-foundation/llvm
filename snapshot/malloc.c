@@ -336,7 +336,7 @@ void init_allocator() {
     
     printf("--- Dual Arena Allocator Initialized ---\n");
     printf("Main arena:     %p, size: %zu MB\n", s_main_arena_start, s_main_arena_size / (1024 * 1024));
-    printf("Metadata arena: %p, size: %zu MB (grows down)\n", s_metadata_arena_start, s_metadata_arena_size / (1024 * 1024));
+    printf("Metadata arena: %p, size: %zu MB\n", s_metadata_arena_start, s_metadata_arena_size / (1024 * 1024));
 }
 
 // Add these at the end before init_allocator()
