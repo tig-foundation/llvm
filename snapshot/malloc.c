@@ -16,6 +16,7 @@
 #define METADATA_ARENA_SIZE     (1024UL * 1024 * 64)      // 64MB for metadata (grows down)
 #define MAIN_ARENA_ADDRESS      ((void*)0x40000000000)
 #define METADATA_ARENA_ADDRESS  ((void*)0x50000000000)
+#define REWIND_RWX_PAGE         ((void*)0x60000000000)
 
 // --- Allocator Constants ---
 #define ALLOC_MAGIC             0xC001C0DE
@@ -48,6 +49,8 @@ static void* s_metadata_arena_start = NULL;
 static size_t s_metadata_arena_size = 0;
 static void* s_metadata_current = NULL; // Current allocation pointer for downward growth
 static pthread_mutex_t s_metadata_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void* s_rewind_rwx_page = NULL;
 
 static pthread_once_t s_init_once = PTHREAD_ONCE_INIT;
 
@@ -333,10 +336,19 @@ void init_allocator() {
     
     // Initialize metadata bump pointer to the top of the arena
     s_metadata_current = (char*)s_metadata_arena_start + s_metadata_arena_size;
+
+    s_rewind_rwx_page = mmap(REWIND_RWX_PAGE, 4096 * 4, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);  // 4 pages
+    if (s_rewind_rwx_page == MAP_FAILED) {
+        perror("FATAL: Failed to allocate rewind rwx page");
+        munmap(s_main_arena_start, s_main_arena_size);
+        munmap(s_metadata_arena_start, s_metadata_arena_size);
+        exit(errno);
+    }
     
     printf("--- Dual Arena Allocator Initialized ---\n");
     printf("Main arena:     %p, size: %zu MB\n", s_main_arena_start, s_main_arena_size / (1024 * 1024));
     printf("Metadata arena: %p, size: %zu MB\n", s_metadata_arena_start, s_metadata_arena_size / (1024 * 1024));
+    printf("Rewind rwx page: %p\n", s_rewind_rwx_page);
 }
 
 // Add these at the end before init_allocator()
