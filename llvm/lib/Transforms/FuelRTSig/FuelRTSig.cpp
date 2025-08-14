@@ -642,7 +642,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         //ThreadLocalRuntimeSigGlobal->setDSOLocal(true);
         ThreadLocalRuntimeSigGlobal->setThreadLocal(true);
 
-        CurrMemoryUsageGlobal = new GlobalVariable(M,
+        /*CurrMemoryUsageGlobal = new GlobalVariable(M,
             Type::getInt64Ty(Context),
             false,
             GlobalValue::ExternalLinkage,
@@ -667,7 +667,16 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
             ConstantInt::get(Type::getInt64Ty(Context), 0),
             "__max_memory_usage");
         MaxMemoryUsageGlobal->setAlignment(Align(8));
-        //MaxMemoryUsageGlobal->setDSOLocal(true);
+        //MaxMemoryUsageGlobal->setDSOLocal(true);*/
+
+        MaxMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__max_memory_usage", Type::getInt64Ty(Context)));
+        MaxMemoryUsageGlobal->setLinkage(GlobalValue::ExternalLinkage);
+
+        CurrMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__curr_memory_usage", Type::getInt64Ty(Context)));
+        CurrMemoryUsageGlobal->setLinkage(GlobalValue::ExternalLinkage);
+
+        TotalMemoryUsageGlobal = cast<GlobalVariable>(M.getOrInsertGlobal("__total_memory_usage", Type::getInt64Ty(Context)));
+        TotalMemoryUsageGlobal->setLinkage(GlobalValue::ExternalLinkage);
 
         /*MaxAllowedMemoryUsageGlobal = new GlobalVariable(M,
             Type::getInt64Ty(Context),
