@@ -896,7 +896,7 @@ PreservedAnalyses FuelRTSigPass::run(Module &M, ModuleAnalysisManager &AM)
         if (F.isDeclaration() || F.isIntrinsic() || F.getName().starts_with("llvm.") ||
             F.getName() == "__check_fuel" || F.getName() == "__commit_tls" || F.getName() == "__memory_check" ||
             F.getName() == "__create_snapshot" || F.getName() == "__create_delta" || F.getName() == "__capture_x86_state" ||
-            F.getName() == "__capture_aarch64_state")
+            F.getName() == "__capture_aarch64_state" || F.getName() == "__copy_to_restore_region" || F.getName() == "__switch_stack_and_call")
             continue;
 
         //errs() << llFileBaseName << "::" << rustDemangle(F.getName().str()) << "\n";
