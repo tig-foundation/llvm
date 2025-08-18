@@ -16,7 +16,9 @@
 #define METADATA_ARENA_SIZE     (1024UL * 1024 * 64)      // 64MB for metadata (grows down)
 #define MAIN_ARENA_ADDRESS      ((void*)0x40000000000)
 #define METADATA_ARENA_ADDRESS  ((void*)0x50000000000)
-#define REWIND_RWX_PAGE         ((void*)0x60000000000)
+#define SNAPSHOT_REGISTRY_ADDRESS ((void*)0x60000000000)
+#define SNAPSHOT_REGISTRY_SIZE   0x1000000000
+#define REWIND_RWX_PAGE         ((void*)0x70000000000)
 
 // --- Allocator Constants ---
 #define ALLOC_MAGIC             0xC001C0DE
@@ -52,6 +54,9 @@ static pthread_mutex_t s_metadata_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void* s_rewind_rwx_page = NULL;
 
+static size_t s_snapshot_registry_size = 0;
+static void* s_snapshot_registry = NULL;
+
 static pthread_once_t s_init_once = PTHREAD_ONCE_INIT;
 
 // --- Forward Declarations ---
@@ -77,6 +82,9 @@ static bool has_hugepages_available(size_t required_size) {
 static size_t align_up(size_t size, size_t align) {
     return (size + align - 1) & ~(align - 1);
 }
+
+void *__snapshot_registry = NULL;
+size_t __snapshot_count = 0;
 
 // --- Internal Core Allocator (Main Arena) ---
 // NOTE: These functions assume the s_main_mutex is already held.
@@ -287,26 +295,30 @@ void* realloc(void* ptr, size_t new_size) {
 // --- Initializer ---
 void init_allocator() {
     // === MAIN ARENA (User allocations) ===
+    #ifdef __APPLE__
+    int main_flags = MAP_PRIVATE | MAP_ANONYMOUS;
+    #else
     int main_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE;
+    #endif
     s_main_arena_size = MAIN_ARENA_SIZE;
     
     // Try hugepages first
-    size_t hugepage_size = get_hugepage_size();
+    /*size_t hugepage_size = get_hugepage_size();
     if (hugepage_size > 0 && has_hugepages_available(MAIN_ARENA_SIZE)) {
         s_main_arena_size = align_up(MAIN_ARENA_SIZE, hugepage_size);
         main_flags |= MAP_HUGETLB;
         printf("Attempting to use hugepages for main arena\n");
-    }
+    }*/
     
     s_main_arena_start = mmap(MAIN_ARENA_ADDRESS, s_main_arena_size, PROT_READ | PROT_WRITE, main_flags, -1, 0);
     
-    if (s_main_arena_start == MAP_FAILED && (main_flags & MAP_HUGETLB)) {
+    /*if (s_main_arena_start == MAP_FAILED && (main_flags & MAP_HUGETLB)) {
         // Fallback without hugepages
         printf("Hugepage allocation failed, falling back to standard pages\n");
         s_main_arena_size = MAIN_ARENA_SIZE;
         main_flags &= ~MAP_HUGETLB;
         s_main_arena_start = mmap(MAIN_ARENA_ADDRESS, s_main_arena_size, PROT_READ | PROT_WRITE, main_flags, -1, 0);
-    }
+    }*/
     
     if (s_main_arena_start == MAP_FAILED) {
         perror("FATAL: Failed to allocate main arena");
@@ -323,7 +335,12 @@ void init_allocator() {
     add_to_free_list(first_block); // Initializes the free list
     
     // === METADATA ARENA (Snapshots, etc.) ===
+    #ifdef __APPLE__
+    int metadata_flags = MAP_PRIVATE | MAP_ANONYMOUS;
+    #else
     int metadata_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE;
+    #endif
+
     s_metadata_arena_size = METADATA_ARENA_SIZE;
     s_metadata_arena_start = mmap(METADATA_ARENA_ADDRESS, s_metadata_arena_size, PROT_READ | PROT_WRITE, metadata_flags, -1, 0);
     
@@ -337,14 +354,29 @@ void init_allocator() {
     // Initialize metadata bump pointer to the top of the arena
     s_metadata_current = (char*)s_metadata_arena_start + s_metadata_arena_size;
 
-    s_rewind_rwx_page = mmap(REWIND_RWX_PAGE, 4096 * 4, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);  // 4 pages
+    #ifdef __APPLE__
+    s_rewind_rwx_page = mmap(REWIND_RWX_PAGE, 4096 * 4, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
+    #else
+    s_rewind_rwx_page = mmap(REWIND_RWX_PAGE, 4096 * 4, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    #endif
     if (s_rewind_rwx_page == MAP_FAILED) {
         perror("FATAL: Failed to allocate rewind rwx page");
         munmap(s_main_arena_start, s_main_arena_size);
         munmap(s_metadata_arena_start, s_metadata_arena_size);
         exit(errno);
     }
+
     
+    s_snapshot_registry_size = SNAPSHOT_REGISTRY_SIZE;
+    __snapshot_registry = mmap(SNAPSHOT_REGISTRY_ADDRESS, s_snapshot_registry_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    if (__snapshot_registry == MAP_FAILED) {
+        perror("FATAL: Failed to allocate snapshot registry");
+        munmap(s_main_arena_start, s_main_arena_size);
+        munmap(s_metadata_arena_start, s_metadata_arena_size);
+        munmap(s_rewind_rwx_page, 4096 * 4);
+        exit(errno);
+    }
+
     printf("--- Dual Arena Allocator Initialized ---\n");
     printf("Main arena:     %p, size: %zu MB\n", s_main_arena_start, s_main_arena_size / (1024 * 1024));
     printf("Metadata arena: %p, size: %zu MB\n", s_metadata_arena_start, s_metadata_arena_size / (1024 * 1024));
