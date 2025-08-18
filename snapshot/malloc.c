@@ -83,8 +83,8 @@ static size_t align_up(size_t size, size_t align) {
     return (size + align - 1) & ~(align - 1);
 }
 
-void *__snapshot_registry = NULL;
-size_t __snapshot_count = 0;
+extern void *__snapshot_registry;
+extern size_t __snapshot_count;
 
 // --- Internal Core Allocator (Main Arena) ---
 // NOTE: These functions assume the s_main_mutex is already held.
